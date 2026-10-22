@@ -1,0 +1,35 @@
+# Builds the double-click Mac and Windows downloads and publishes them as a GitHub Release.
+# Push a tag like v0.2.0 (or v0.2.0-beta.1 for a pre-release) to run it.
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: node scripts/package.js
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          PRE=""; case "$TAG" in *-*) PRE="--prerelease";; esac
+          {
+            echo '**Mac:** download `ShowControl-mac.zip`, open it, then double-click **Show Control.command** in the folder.'
+            echo 'The first time, macOS says it cannot check the app. Click Done, open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.'
+            echo
+            echo '**Windows:** download `ShowControl-windows.zip`, right-click it and choose **Extract All**, then double-click **Start Show Control.bat**.'
+            echo
+            echo 'Nothing else to install. It starts in practice mode with simulated equipment, opens your browser, and shows a code to scan with your iPad.'
+          } > notes.md
+          gh release create "$TAG" dist/ShowControl-mac.zip dist/ShowControl-windows.zip \
+            --title "Show Control $TAG" --notes-file notes.md $PRE

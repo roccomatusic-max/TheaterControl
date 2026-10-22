@@ -4,7 +4,7 @@ const net = require('net');
 const dgram = require('dgram');
 const osc = require('../server/lib/osc');
 
-const log = (who, msg) => console.log(`[sim ${who}] ${msg}`);
+const log = (who, msg) => process.env.SHOW_QUIET || console.log(`[sim ${who}] ${msg}`);
 
 // ---------- ETC Eos (OSC over TCP/SLIP) ----------
 function eosSim(port) {
