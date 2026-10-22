@@ -191,3 +191,4 @@ button.primary { background: var(--go-d); border-color: var(--go); font-weight: 
 .switch { display: flex; gap: 10px; align-items: center; font-size: 16px; min-height: 44px; }
 .switch input { width: 26px; height: 26px; }
 #conn { cursor: pointer; }
+.form.two { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }

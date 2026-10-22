@@ -15,7 +15,7 @@ const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: path.join(
 const live = path.join(home, 'Show Control', 'show.json');
 const practice = path.join(home, 'Show Control', 'practice-show.json');
 
-async function connect(expectMode) {
+async function connect(expectMode, pin) {
   for (let i = 0; i < 40; i++) {
     try {
       const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -24,11 +24,13 @@ async function connect(expectMode) {
         ws.on('error', reject);
         ws.on('message', raw => {
           const m = JSON.parse(raw);
+          if (m.t === 'auth-required') { if (pin) ws.send(JSON.stringify({ t: 'auth', pin })); else resolve({ ws, locked: true }); }
           if (m.t === 'init') resolve({ ws, init: m, ask: q => new Promise(r => { const id = ++seq; pending[id] = r; ws.send(JSON.stringify({ ...q, id })); }) });
           if ((m.t === 'reply' || m.t === 'error') && pending[m.id]) pending[m.id](m.t === 'reply' ? m.data : { error: m.msg });
         });
       });
-      if (!expectMode || c.init.mode === expectMode) return c;
+      if (c.locked) { c.ws.close(); if (!pin && expectMode === 'locked') return c; }
+      else if (!expectMode || c.init.mode === expectMode) return c;
       c.ws.close();
     } catch { /* not up yet */ }
     await wait(500);
@@ -72,10 +74,14 @@ async function connect(expectMode) {
     assert.ok(file.show.cues.length > 5, 'cue list copied into the real show');
 
     // Go live: server restarts on its own in live mode, with the real show file.
-    r = await c.ask({ t: 'setup-save', action: 'go-live', name: 'Into the Woods', devices: devs });
+    const badPin = await c.ask({ t: 'setup-save', action: 'go-live', name: 'Into the Woods', pin: '12 34', devices: devs });
+    assert.ok(/PIN/.test(badPin.error || ''), 'odd PIN refused');
+    r = await c.ask({ t: 'setup-save', action: 'go-live', name: 'Into the Woods', pin: '2468', devices: devs });
     assert.equal(r.restarting, true);
     c.ws.close();
-    c = await connect('live');
+    await connect('locked'); // live mode asks for the PIN set on the Setup screen
+    c = await connect('live', '2468');
+    assert.equal((await c.ask({ t: 'setup-get' })).pin, '2468');
     assert.equal(c.init.show.name, 'Into the Woods');
     assert.ok(!c.init.devices.some(d => d.id === 'tf5'), 'equipment without an address is left out');
     assert.equal(JSON.parse(fs.readFileSync(live, 'utf8')).live, true);
@@ -87,7 +93,7 @@ async function connect(expectMode) {
     assert.ok(!a.on, 'autostart off');
 
     // Back to practice: cue list goes back too.
-    r = await c.ask({ t: 'setup-save', action: 'practice', name: 'Into the Woods', devices: devs });
+    r = await c.ask({ t: 'setup-save', action: 'practice', name: 'Into the Woods', pin: '2468', devices: devs });
     c.ws.close();
     c = await connect('practice');
     assert.equal(JSON.parse(fs.readFileSync(live, 'utf8')).live, false);

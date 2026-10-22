@@ -7,7 +7,7 @@ const KINDS = {
     label: 'ETC Eos lighting console', idBase: 'eos', fields: [],
     help: [
       'Plug the console\'s network port into the show network switch.',
-      'Exit Eos to the Shell (the start-up screen), then open Settings > Network. Give that port a fixed address, for example 192.168.1.10, and tick "UDP Strings & OSC" under Interface Protocols.',
+      'Exit Eos to the Shell (the start-up screen), then open Settings > Network. Give that port a fixed address (10.101.100.101 is the Eos factory address, mask 255.255.0.0), and tick "UDP Strings & OSC" under Interface Protocols.',
       'Start Eos again. Go to Setup > System > Show Control > OSC and turn on OSC RX and OSC TX.',
       'Type the console\'s address in the Address box and tap Test.',
     ],
@@ -16,14 +16,14 @@ const KINDS = {
     label: 'Yamaha TF mixer', idBase: 'mixer', fields: [],
     help: [
       'Plug the NETWORK port on the back of the TF5 into the show network switch.',
-      'On the TF5 screen open Setup, then Network. Choose a fixed (static) address, for example 192.168.1.20, with subnet mask 255.255.255.0.',
+      'On the TF5 screen open Setup, then Network. Choose a fixed (static) address, for example 10.101.50.20, with subnet mask 255.255.0.0.',
       'Type the same address in the Address box and tap Test. (TF Editor and StageMix use the same setting, so if those work, this will too.)',
     ],
   },
   qlab: {
     label: 'QLab', idBase: 'qlab', fields: [['passcode', 'password', 'QLab passcode (only if you set one)', '']],
     help: [
-      'On the QLab Mac, give its network connection a fixed address in System Settings > Network (for example 192.168.1.30). If QLab runs on this same computer, use 127.0.0.1.',
+      'On the QLab Mac, give its network connection a fixed address in System Settings > Network (for example 10.101.50.10, mask 255.255.0.0). If QLab runs on this same computer, use 127.0.0.1.',
       'Open your show in QLab. Click the gear icon (Workspace Settings), then Network (QLab 5) or OSC Controls (QLab 4), and make sure OSC access is allowed.',
       'If you set an OSC passcode there, it needs Control permission. Type it in the passcode box.',
       'If the Mac asks whether QLab may accept incoming connections, click Allow. Then tap Test.',
@@ -45,7 +45,7 @@ const KINDS = {
     fields: [['model', 'select:pt-dz13k=PT-DZ13K series|pt-dz770=PT-DZ770 series', 'Model'], ['username', 'text', 'Username', 'admin1'], ['password', 'password', 'Password', '']],
     help: [
       'Plug the projector\'s LAN port into the show network switch.',
-      'In the projector\'s on-screen menu: NETWORK > NETWORK SETUP. Turn DHCP off and set a fixed address, for example 192.168.1.41.',
+      'In the projector\'s on-screen menu: NETWORK > NETWORK SETUP. Turn DHCP off and set a fixed address, for example 10.101.60.31, mask 255.255.0.0.',
       'NETWORK > NETWORK CONTROL: turn COMMAND CONTROL on.',
       'Set STANDBY MODE to NORMAL (not ECO), so the projector still answers when it is switched off.',
       'The username and password are the ones for the projector\'s web page (often admin1 / panasonic from the factory). Type them in the boxes and tap Test.',
@@ -72,6 +72,9 @@ function ask(t, payload = {}, ms = 20000) {
     setTimeout(() => { if (pending[id]) { delete pending[id]; res({ error: 'No answer from Show Control' }); } }, ms);
   });
 }
+
+// "10.101.something" for a 255.255.0.0 network: the part of the address every device must share.
+const samePart = n => { const k = n.netmask.split('.').filter(x => x === '255').length || 3; return `${n.address.split('.').slice(0, k).join('.')}${'.something'.repeat(4 - k)}`; };
 
 function setupTab() {
   const st = S.setup;
@@ -103,9 +106,11 @@ function setupTab() {
       nets.length ? h('div', { class: 'kv' }, nets.map(n => [h('b', { class: 'mono' }, n.address), h('span', {}, n.name)]))
         : h('p', { class: 'warnline' }, 'This computer is not connected to a network. Plug it into the show network switch.'),
       h('p', { class: 'hint' }, nets.length
-        ? `Every piece of equipment needs its own address that starts the same way as this computer's (for example ${nets[0].address.split('.').slice(0, 3).join('.')}.something), each ending in a different number.`
+        ? `Every piece of equipment needs its own fixed address that starts the same way as this computer's (${samePart(nets[0])}), each one different, with subnet mask ${nets[0].netmask}.`
         : '')),
-    h('div', { class: 'card form' }, h('label', {}, 'Show name', h('input', { value: st.name || '', oninput: e => { st.name = e.target.value; edit(); } }))),
+    h('div', { class: 'card form two' }, h('label', {}, 'Show name', h('input', { value: st.name || '', oninput: e => { st.name = e.target.value; edit(); } })),
+      h('label', {}, practice ? 'PIN for iPads and phones (used when live)' : 'PIN for iPads and phones', h('input', { inputmode: 'numeric', autocomplete: 'off', value: st.pin || '', placeholder: 'none',
+        oninput: e => { st.pin = e.target.value.trim(); edit(); } }))),
   );
 
   // Equipment list
@@ -134,7 +139,7 @@ function setupTab() {
         h('input', { class: 'name', value: d.name || '', 'aria-label': 'Name', oninput: e => { d.name = e.target.value; edit(); } }),
         h('span', { class: 'kind' }, k.label)),
       h('div', { class: 'form fields' },
-        h('label', {}, 'Address', h('input', { inputmode: 'decimal', autocomplete: 'off', autocapitalize: 'off', value: d.host || '', placeholder: 'e.g. 192.168.1.20',
+        h('label', {}, 'Address', h('input', { inputmode: 'decimal', autocomplete: 'off', autocapitalize: 'off', value: d.host || '', placeholder: 'e.g. 10.101.50.20',
           onchange: e => { d.host = e.target.value.trim(); edit(); delete st.tests[d.id]; redraw(); } })),
         k.fields.map(fieldEl)),
       h('div', { class: `result ${t ? (t.running ? 'run' : t.ok ? 'ok' : 'bad') : ''}` },
@@ -183,8 +188,9 @@ function setupTab() {
     }
     if (action === 'practice' && !confirm('Back to practice mode? Show Control restarts with pretend equipment. Your equipment list and cue list are kept.')) return;
     if (action === 'save' && live && !confirm('Save and restart Show Control (about 5 seconds)?')) return;
-    const r = await ask('setup-save', { action, name: st.name, devices: st.devices });
+    const r = await ask('setup-save', { action, name: st.name, pin: st.pin || '', devices: st.devices });
     if (r.error) return toast(`Not saved: ${r.error}`, 7000);
+    if (st.pin) localStorage.setItem('pin', st.pin); // this iPad signs straight back in after the restart
     st.dirty = false;
     const names = r.missing?.length ? r.missing.map(id => st.devices.find(d => d.id === id)?.name || id) : [];
     if (names.length) toast(`Saved. Cue steps that use ${names.join(', ')} will be skipped until ${names.length > 1 ? 'they have addresses' : 'it has an address'}.`, 7000);

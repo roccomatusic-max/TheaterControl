@@ -204,7 +204,8 @@ function setupInfo() {
   const list = MODE === 'practice' ? (live?.devices || setup.realTemplate(cfg.devices)) : (readJson(SAVE_PATH, cfg).devices || cfg.devices);
   let autostart = null;
   if (SUPERVISED) try { autostart = require('../launcher/autostart').status(); } catch { /* not available on this system */ }
-  return { mode: MODE, name: (MODE === 'practice' ? live?.show?.name : show.name) || show.name.replace(/^Simulated /, ''), devices: list,
+  const pin = (MODE === 'practice' ? live?.server?.pin : readJson(SAVE_PATH, cfg).server?.pin) || '';
+  return { mode: MODE, name: (MODE === 'practice' ? live?.show?.name : show.name) || show.name.replace(/^Simulated /, ''), pin: String(pin), devices: list,
     networks: setup.localNetworks(), autostart, supervised: SUPERVISED };
 }
 // Saves the equipment list. action: "save" (stay in this mode), "go-live", or "practice".
@@ -230,6 +231,9 @@ function saveSetup(m, who) {
       if (p) writeJson(process.env.SHOW_PRACTICE_PATH, { ...p, show: { ...live.show, name: p.show?.name || name } });
     }
   }
+  const pin = String(m.pin ?? out.server?.pin ?? '').trim();
+  if (!/^[A-Za-z0-9]{0,12}$/.test(pin)) throw new Error('The PIN can be up to 12 letters or numbers');
+  out.server = { ...(out.server || {}), pin };
   const file = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
   if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`);
   writeJson(file, out);

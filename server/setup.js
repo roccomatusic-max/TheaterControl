@@ -47,7 +47,7 @@ const PLAIN = {
   EHOSTUNREACH: 'This computer cannot reach that address. Check the network cable and that the address is right.',
   ENETUNREACH: 'This computer is not on a network that can reach that address.',
   ETIMEDOUT: 'Nothing answered at that address.',
-  ENOTFOUND: 'That name could not be found. Use the number address instead (like 192.168.1.20).',
+  ENOTFOUND: 'That name could not be found. Use the number address instead (like 10.101.50.20).',
 };
 
 // Starts a throwaway copy of the real driver and waits for it to hear from the device.
