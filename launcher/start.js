@@ -63,6 +63,9 @@ function portFree(port) {
   const run = () => {
     if (stopping) return;
     const practice = !isLive();
+    if (practice && fs.existsSync(USER_CFG)) try { JSON.parse(fs.readFileSync(USER_CFG, 'utf8')); } catch (e) {
+      console.log(`\n  Your show file has a mistake in it, so Show Control is starting in practice mode.\n  ${USER_CFG}: ${e.message}\n  Saving on the Setup screen replaces it (the old one is kept as show.json.bak).\n`);
+    }
     const cfgPath = !practice ? USER_CFG : fs.existsSync(PRACTICE_CFG) ? PRACTICE_CFG : SIM_CFG;
     started = Date.now();
     child = fork(path.join(__dirname, 'run.js'), [cfgPath], {
