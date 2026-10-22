@@ -1,6 +1,7 @@
 // Projector control against the simulated Panasonic PT-DZ13Ks and PJLink projector:
 // auth, power confirmation, warm-up/cool-down refusals, shutter polarity, inputs, gating, groups.
 process.env.PORT = process.env.PORT || '18081';
+process.env.SHOW_STATE_FILE = ''; // start every test run at the top of the show
 require('../sim/run');
 const WebSocket = require('ws');
 const assert = require('assert');

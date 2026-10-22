@@ -1,5 +1,6 @@
 // End-to-end check against the simulators: every driver connects, and commands round-trip.
 process.env.PORT = process.env.PORT || '18080';
+process.env.SHOW_STATE_FILE = ''; // start every test run at the top of the show
 require('../sim/run');
 const WebSocket = require('ws');
 const assert = require('assert');

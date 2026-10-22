@@ -12,6 +12,8 @@ const QRCode = require('qrcode');
 const ROOT = path.join(__dirname, '..');
 const USER_DIR = path.join(os.homedir(), 'Show Control');
 const USER_CFG = path.join(USER_DIR, 'show.json');
+// Cue edits made in practice mode are kept here, so updating the app never loses them.
+const PRACTICE_CFG = path.join(USER_DIR, 'practice-show.json');
 
 function openBrowser(url) {
   const [cmd, args] = process.platform === 'darwin' ? ['open', [url]]
@@ -38,7 +40,8 @@ function portFree(port) {
 
 (async () => {
   const practice = !fs.existsSync(USER_CFG);
-  const cfgPath = practice ? path.join(ROOT, 'config/show.sim.json') : USER_CFG;
+  const cfgPath = !practice ? USER_CFG : fs.existsSync(PRACTICE_CFG) ? PRACTICE_CFG : path.join(ROOT, 'config/show.sim.json');
+  process.env.SHOW_SAVE_PATH = practice ? PRACTICE_CFG : USER_CFG;
   const wanted = Number(JSON.parse(fs.readFileSync(cfgPath, 'utf8')).server?.port || 8080);
 
   if (await alreadyRunning(wanted)) {
