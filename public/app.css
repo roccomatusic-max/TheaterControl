@@ -7,6 +7,7 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
 body { display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; }
+input, textarea { user-select: text; -webkit-user-select: text; } /* iOS Safari will not type into inputs that inherit user-select: none */
 button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-height: 44px; cursor: pointer; touch-action: manipulation; }
 button:active { filter: brightness(1.4); }
 button.on { background: var(--blue); border-color: var(--blue); }
@@ -168,3 +169,25 @@ select { font: inherit; font-size: 16px; color: var(--text); background: #000; b
 .sticky-save { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; display: flex; gap: 8px; }
 .sticky-save button { flex: 1; }
 button.primary { background: var(--go-d); border-color: var(--go); font-weight: 700; }
+
+/* Setup (practice → real equipment) */
+.setup { display: grid; gap: var(--gap); max-width: 980px; margin: 0 auto; }
+.setup h3 { margin-top: 0; }
+.card.mode.practice { border-color: var(--amber); } .card.mode.live { border-color: var(--go-d); }
+.card.mode p { margin: 0 0 10px; color: var(--text); }
+.hint { color: var(--dim); font-size: 13px; margin: 8px 0 0; }
+.equip { display: grid; gap: var(--gap); }
+.dev .devhead { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.dev .devhead .name { flex: 1 1 200px; font-weight: 700; font-size: 17px; }
+.dev .kind { color: var(--dim); font-size: 13px; }
+.dev .fields { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.dev.nohost { opacity: .75; }
+.dev .result { margin: 10px 0; font-size: 14px; color: var(--dim); }
+.dev .result.ok { color: #7ee2a2; } .dev .result.bad { color: #ffb4b6; } .dev .result.run { color: #f8d48a; }
+.dev .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.dev .tools button { min-height: 40px; }
+.steps { margin: 12px 0 0; padding-left: 22px; color: #c9ced6; line-height: 1.5; }
+.steps li { margin-bottom: 6px; }
+.switch { display: flex; gap: 10px; align-items: center; font-size: 16px; min-height: 44px; }
+.switch input { width: 26px; height: 26px; }
+#conn { cursor: pointer; }

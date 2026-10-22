@@ -8,6 +8,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const drivers = require('./drivers');
+const setup = require('./setup');
 
 const cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.join(__dirname, '../config/show.json'));
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
@@ -17,6 +18,12 @@ const PIN = process.env.SHOW_PIN || cfg.server?.pin || '';
 // and where cue position + timers are kept so a restart mid-show resumes at the same cue.
 const SAVE_PATH = process.env.SHOW_SAVE_PATH || cfgPath;
 const STATE_PATH = process.env.SHOW_STATE_FILE ?? path.join(path.dirname(SAVE_PATH), `.${path.basename(SAVE_PATH, '.json')}.state.json`);
+// Set by the double-click launcher: practice (simulated gear) or live (the real show file), and
+// where the real show file lives. Run directly (node server/index.js show.json) it's "direct".
+const MODE = process.env.SHOW_MODE || 'direct';
+const LIVE_PATH = process.env.SHOW_LIVE_PATH || cfgPath;
+const SUPERVISED = !!process.env.SHOW_SUPERVISED; // the launcher restarts us when we exit with RESTART
+const RESTART = 75;
 
 // ---------- devices ----------
 const logRing = [];
@@ -128,7 +135,8 @@ function validateCues(cues) {
     const actions = (c.actions || []).map((a, j) => {
       const where = `cue ${i + 1}, action ${j + 1}`;
       if (typeof a.device !== 'string' || typeof a.cmd !== 'string') throw new Error(`${where}: needs a device and a command`);
-      if (!a.device.startsWith('group:') && !devices.has(a.device)) throw new Error(`${where}: unknown device "${a.device}"`);
+      // equipment that's in the show file but has no address yet still counts (its steps are skipped at GO)
+      if (!a.device.startsWith('group:') && !devices.has(a.device) && !cfg.devices.some(d => d.id === a.device)) throw new Error(`${where}: unknown device "${a.device}"`);
       const delay = Number(a.delay || 0);
       if (!(delay >= 0 && delay <= 600)) throw new Error(`${where}: delay must be 0-600 seconds`);
       return { device: a.device, cmd: a.cmd, ...(a.args && Object.keys(a.args).length ? { args: a.args } : {}), ...(delay ? { delay } : {}) };
@@ -188,6 +196,52 @@ function timer(name, op) {
   saveState();
 }
 
+// ---------- Setup screen: real equipment, practice/live ----------
+const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } };
+function setupInfo() {
+  const live = readJson(LIVE_PATH, null);
+  // In practice the form starts from the real show file if there is one, else from the practice gear with blank addresses.
+  const list = MODE === 'practice' ? (live?.devices || setup.realTemplate(cfg.devices)) : (readJson(SAVE_PATH, cfg).devices || cfg.devices);
+  let autostart = null;
+  if (SUPERVISED) try { autostart = require('../launcher/autostart').status(); } catch { /* not available on this system */ }
+  return { mode: MODE, name: (MODE === 'practice' ? live?.show?.name : show.name) || show.name.replace(/^Simulated /, ''), devices: list,
+    networks: setup.localNetworks(), autostart, supervised: SUPERVISED };
+}
+// Saves the equipment list. action: "save" (stay in this mode), "go-live", or "practice".
+// The cue list goes with you: practice cues are copied into the real show when going live, and back.
+function saveSetup(m, who) {
+  const list = setup.cleanDevices(m.devices);
+  const name = String(m.name || '').trim() || show.name;
+  const ids = new Set(list.filter(d => d.enabled !== false).map(d => d.id));
+  let out;
+  if (MODE === 'direct') {
+    out = { ...readJson(SAVE_PATH, cfg), devices: list };
+    out.show = { ...(out.show || {}), name };
+  } else if (MODE === 'practice') {
+    const live = readJson(LIVE_PATH, {}), practice = readJson(SAVE_PATH, cfg);
+    out = { ...live, ...practice, server: live.server || practice.server, devices: list, live: m.action === 'go-live' };
+    out.show = { ...(practice.show || {}), name };
+  } else {
+    const live = readJson(LIVE_PATH, cfg);
+    out = { ...live, devices: list, live: m.action !== 'practice' };
+    out.show = { ...(live.show || {}), name };
+    if (m.action === 'practice' && process.env.SHOW_PRACTICE_PATH) {
+      const p = readJson(process.env.SHOW_PRACTICE_PATH, null) || readJson(process.env.SHOW_SIM_CONFIG, null);
+      if (p) writeJson(process.env.SHOW_PRACTICE_PATH, { ...p, show: { ...live.show, name: p.show?.name || name } });
+    }
+  }
+  const file = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
+  if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`);
+  writeJson(file, out);
+  // Steps in cues that point at equipment that's gone or has no address are skipped at GO; say so now.
+  const missing = [...new Set((out.show?.cues || []).flatMap(c => (c.actions || []).map(a => a.device))
+    .filter(id => !id.startsWith('group:') && !ids.has(id)))];
+  const restarting = SUPERVISED && (m.action !== 'save' || MODE !== 'practice');
+  log({ device: 'core', level: 'cmd', msg: `equipment setup saved (${m.action}) by ${who}${restarting ? ', restarting' : ''}`, t: Date.now() });
+  if (restarting) setTimeout(() => { for (const d of devices.values()) d.stop(); process.exit(RESTART); }, 500);
+  return { restarting, missing };
+}
+
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
 function lanAddresses() {
@@ -232,7 +286,7 @@ wss.on('connection', (ws, req) => {
   ws.authed = !PIN;
   const hello = () => ws.send(JSON.stringify({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
-    ui: cfg.ui || {}, groups: groups(),
+    ui: cfg.ui || {}, groups: groups(), mode: MODE,
   }));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
 
@@ -258,6 +312,13 @@ wss.on('connection', (ws, req) => {
         broadcast({ t: 'show', show: showSnapshot() });
       }
       else if (m.t === 'emergency') await emergencyStop(who);
+      else if (m.t === 'setup-get') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: setupInfo() }));
+      else if (m.t === 'setup-test') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await setup.testDevice(m.device || {}) }));
+      else if (m.t === 'setup-save') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: saveSetup(m, who) }));
+      else if (m.t === 'autostart') {
+        if (!SUPERVISED) throw new Error('Only available when Show Control is started by double-clicking it');
+        ws.send(JSON.stringify({ t: 'reply', id: m.id, data: require('../launcher/autostart').set(!!m.on) }));
+      }
       else if (m.t === 'save-cues') {
         saveCues(m.cues, who);
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));

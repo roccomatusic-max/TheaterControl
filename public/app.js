@@ -9,7 +9,7 @@ function h(tag, attrs = {}, ...kids) {
     else if (k === 'style') el.style.cssText = v;
     else if (v !== false && v != null) el.setAttribute(k, v);
   }
-  for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
   return el;
 }
 
@@ -38,7 +38,9 @@ function cmd(device, c, args) {
 }
 let offlineTimer;
 function setConn(ok) {
-  const c = $('#conn'); c.textContent = ok ? 'live' : 'offline'; c.className = 'pill ' + (ok ? 'ok' : 'off');
+  // practice = pretend equipment (tap to set up the real gear), live = real equipment
+  const c = $('#conn'); c.textContent = ok ? (S.mode === 'practice' ? 'practice' : 'live') : 'offline';
+  c.className = 'pill ' + (ok ? (S.mode === 'practice' ? 'warn' : 'ok') : 'off');
   clearTimeout(offlineTimer);
   if (ok) $('#offline').hidden = true;
   else offlineTimer = setTimeout(() => ($('#offline').hidden = false), 1200); // brief blips don't flash the warning
@@ -50,6 +52,8 @@ function handle(m) {
   else if (m.t === 'init') {
     $('#pin').hidden = true;
     S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || [];
+    S.mode = m.mode; setConn(true);
+    if (S.setup?.restarting) S.setup = null; // back after a practice/live switch: reload the equipment list
     S.clockSkew = m.show.now - Date.now();
     $('#showName').textContent = m.show.name;
     renderEmergency();
@@ -61,6 +65,7 @@ function handle(m) {
     renderDots();
   } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); renderEmergency(); (updaters.__show || []).forEach(fn => fn(S.show)); }
   else if (m.t === 'saved') { pending[m.id]?.(true); delete pending[m.id]; }
+  else if (m.t === 'reply') { pending[m.id]?.(m.data); delete pending[m.id]; }
   else if (m.t === 'log') { S.log.push(m.entry); if (S.log.length > 300) S.log.shift(); (updaters.__log || []).forEach(fn => fn(m.entry)); }
   else if (m.t === 'error') { if (m.id && pending[m.id]) { pending[m.id](m.msg); delete pending[m.id]; } else toast(m.msg); }
   else if (m.t === 'result') {
@@ -116,10 +121,10 @@ setInterval(() => { $('#clock').textContent = new Date(Date.now() + S.clockSkew)
 
 function render() {
   for (const k of Object.keys(updaters)) delete updaters[k];
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (S.tab === 'edit' ? 'show' : S.tab)));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ({ edit: 'show', setup: 'sys' }[S.tab] || S.tab)));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab })[S.tab]());
+  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab })[S.tab]());
 }
 
 // ---------- Show tab ----------
@@ -612,7 +617,7 @@ function sysTab() {
   (updaters.__log ||= []).push(e => { const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20; log.append(line(e)); if (atBottom) log.scrollTop = log.scrollHeight; });
   setTimeout(() => (log.scrollTop = log.scrollHeight));
   const devs = h('div', { class: 'kv' }, Object.values(S.devices).map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
-  return h('div', { class: 'grid' }, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
+  return h('div', { class: 'grid' }, setupCard(), h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Log'), log));
 }
 
