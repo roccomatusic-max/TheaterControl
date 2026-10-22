@@ -1,0 +1,14 @@
+# go2rtc (single binary, no internet needed): https://github.com/AlexxIT/go2rtc
+# Pulls each camera's RTSP feed once and re-serves it to iPads/phones as WebRTC (sub-second latency).
+# Run on the show server:  ./go2rtc -config deploy/go2rtc.yaml   → web UI on http://SERVER:1984
+api:
+  listen: ":1984"
+webrtc:
+  listen: ":8555"
+  candidates: [ "stun:8555" ]   # LAN only; replace with the server's control-network IP if clients can't connect
+streams:
+  # PTZOptics / most Sony-protocol PTZs: main stream 1, sub stream 2. Use the sub stream for iPad previews.
+  cam1: rtsp://10.101.60.11:554/2
+  cam2: rtsp://10.101.60.12:554/2
+  cam3: rtsp://10.101.60.13:554/2
+  # NDI|HX cameras: enable their RTSP output, or bridge NDI with an NDI→RTSP tool on the server.

@@ -1,0 +1,17 @@
+{
+  "server": { "port": 8080, "pin": "1234" },
+  "show": { "name": "Our Musical", "timerLabel": "Act 1", "cues": [] },
+  "ui": {
+    "faders": { "channels": [0, 1, 2, 3, 4, 5, 6, 7], "dcas": [0, 1, 2, 3, 4, 5, 6, 7] },
+    "eosQuick": []
+  },
+  "devices": [
+    { "id": "eos", "type": "eos", "name": "ETC Eos", "host": "10.101.100.101", "port": 3037, "transport": "tcp", "user": 0 },
+    { "id": "qlab", "type": "qlab", "name": "QLab", "host": "10.101.50.10", "port": 53000, "passcode": "" },
+    { "id": "tf5", "type": "yamaha-tf", "name": "Yamaha TF5", "host": "10.101.50.20", "port": 49280, "channels": 32, "dcas": 8 },
+    { "id": "cam1", "type": "ptz", "name": "Cam 1", "host": "10.101.60.11", "protocol": "visca-ip", "port": 52381,
+      "presets": [{ "n": 1, "label": "Wide" }],
+      "stream": { "type": "go2rtc", "url": "http://10.101.50.5:1984", "src": "cam1" } },
+    { "id": "proj", "type": "pjlink", "name": "Projector", "host": "10.101.60.30", "password": "" }
+  ]
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS (launchd): copy to ~/Library/LaunchAgents/, edit paths, then: launchctl load -w ~/Library/LaunchAgents/com.show-control.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.show-control</string>
+  <key>WorkingDirectory</key><string>/Users/show/show-control</string>
+  <key>ProgramArguments</key><array><string>/usr/local/bin/node</string><string>server/index.js</string><string>config/show.json</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/show-control.log</string>
+  <key>StandardErrorPath</key><string>/tmp/show-control.log</string>
+</dict></plist>

@@ -1,0 +1,16 @@
+# Linux (systemd): sudo cp deploy/show-control.service /etc/systemd/system/ && sudo systemctl enable --now show-control
+[Unit]
+Description=Show Control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/show-control
+ExecStart=/usr/bin/node server/index.js config/show.json
+Restart=always
+RestartSec=2
+User=show
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

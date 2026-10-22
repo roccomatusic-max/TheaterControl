@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+<title>Show Control</title>
+</head>
+<body>
+<header id="top">
+  <div class="brand"><span id="showName">Show Control</span><span id="conn" class="pill off">offline</span></div>
+  <div id="statusDots"></div>
+  <div class="clock"><span id="clock">--:--:--</span></div>
+  <button id="lockBtn" class="lock" title="Lock controls">🔓</button>
+</header>
+<main id="main"></main>
+<nav id="tabs">
+  <button data-tab="show" class="on">Show</button>
+  <button data-tab="lx">Lighting</button>
+  <button data-tab="snd">Sound</button>
+  <button data-tab="cam">Cameras</button>
+  <button data-tab="sys">System</button>
+</nav>
+<div id="pin" hidden>
+  <form><h2>Enter PIN</h2><input id="pinInput" inputmode="numeric" autocomplete="off" type="password"><button>Unlock</button><p id="pinErr"></p></form>
+</div>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
