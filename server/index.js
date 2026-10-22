@@ -6,6 +6,7 @@ const http = require('http');
 const os = require('os');
 const express = require('express');
 const { WebSocketServer } = require('ws');
+const QRCode = require('qrcode');
 const drivers = require('./drivers');
 
 const cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.join(__dirname, '../config/show.json'));
@@ -19,7 +20,7 @@ const devices = new Map();
 function log(entry) {
   logRing.push(entry); if (logRing.length > 300) logRing.shift();
   broadcast({ t: 'log', entry });
-  console.log(`[${new Date(entry.t).toISOString().slice(11, 19)}] ${entry.device || 'core'}: ${entry.msg}`);
+  if (!process.env.SHOW_QUIET) console.log(`[${new Date(entry.t).toISOString().slice(11, 19)}] ${entry.device || 'core'}: ${entry.msg}`);
 }
 for (const dc of cfg.devices) {
   if (dc.enabled === false) continue;
@@ -105,9 +106,37 @@ function timer(name, op) {
 }
 
 // ---------- HTTP + WS ----------
+// IPv4 addresses an iPad on the same network can reach this computer at.
+function lanAddresses() {
+  return Object.entries(os.networkInterfaces()).flatMap(([name, list]) => (list || [])
+    .filter(i => i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.'))
+    .map(i => ({ name: /^100\./.test(i.address) ? 'Tailscale (works from anywhere)' : 'this network', url: `http://${i.address}:${PORT}`, ts: /^100\./.test(i.address) })))
+    .sort((a, b) => a.ts - b.ts); // local network first, Tailscale last
+}
 const app = express();
+// "Connect your iPad" page: address + QR code to scan with the iPad camera.
+app.get('/connect', async (_, res) => {
+  const addrs = lanAddresses();
+  const qrs = await Promise.all(addrs.map(a => QRCode.toString(a.url, { type: 'svg', margin: 1, color: { dark: '#000', light: '#fff' } })));
+  res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect your iPad · Show Control</title><style>
+body{margin:0;background:#0b0d10;color:#e7eaee;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px}
+main{max-width:860px;margin:0 auto}h1{margin:0 0 4px}p{color:#8b94a1;margin:0 0 20px}
+.addrs{display:flex;flex-wrap:wrap;gap:20px}.a{background:#15181d;border:1px solid #2a3039;border-radius:14px;padding:16px;text-align:center}
+.a svg{width:220px;height:220px;border-radius:8px}.u{font:600 20px ui-monospace,Menlo,monospace;margin-top:8px}.n{color:#8b94a1;font-size:13px}
+ol{color:#c9ced6;padding-left:20px}a.btn{display:inline-block;margin-top:20px;background:#1fbf5a;color:#04140a;font-weight:800;padding:12px 20px;border-radius:10px;text-decoration:none}
+</style></head><body><main>
+<h1>Show Control is running</h1><p>${show.name}</p>
+<h2>Connect your iPad or phone</h2>
+<ol><li>Join the iPad to the <b>same Wi-Fi network</b> as this computer.</li>
+<li>Open the <b>Camera</b> app and point it at the code, then tap the link. Or type the address into Safari.</li>
+<li>In Safari tap <b>Share → Add to Home Screen</b> to get a full-screen app icon.</li></ol>
+<div class="addrs">${addrs.length ? addrs.map((a, i) => `<div class="a">${qrs[i]}<div class="u">${a.url}</div><div class="n">${a.name}</div></div>`).join('') : '<p>This computer is not on a network yet. Connect it to Wi-Fi or Ethernet and reload this page.</p>'}</div>
+<a class="btn" href="/">Open the controls on this computer</a>
+</main></body></html>`);
+});
 app.use(express.static(path.join(__dirname, '../public'), { maxAge: 0 }));
-app.get('/api/health', (_, res) => res.json({ ok: true, devices: [...devices.values()].map(d => ({ id: d.id, status: d.status })) }));
+app.get('/api/health', (_, res) => res.json({ ok: true, app: 'show-control', show: show.name, addresses: lanAddresses(), devices: [...devices.values()].map(d => ({ id: d.id, status: d.status })) }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 function broadcast(msg) {
@@ -152,11 +181,14 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(PORT, cfg.server?.host || '0.0.0.0', () => {
-  const ips = Object.values(os.networkInterfaces()).flat().filter(i => i && i.family === 'IPv4' && !i.internal).map(i => i.address);
+  const urls = lanAddresses().map(a => a.url);
   console.log(`Show Control "${show.name}" using ${cfgPath}`);
-  console.log(`Open on iPad/phone: ${ips.map(ip => `http://${ip}:${PORT}`).join('  ') || `http://localhost:${PORT}`}${PIN ? '  (PIN required)' : ''}`);
+  console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${PIN ? '  (PIN required)' : ''}`);
   for (const d of devices.values()) d.start();
+  server.emit('ready', { port: PORT, urls });
 });
+
+module.exports = { server, lanAddresses };
 
 function shutdown() { for (const d of devices.values()) d.stop(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

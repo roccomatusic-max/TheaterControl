@@ -1,0 +1,46 @@
+# Builds the double-click Mac and Windows downloads and publishes them as a GitHub Release.
+# Runs when main gets a version (package.json "version") that has no release yet,
+# or by hand from the Actions tab (Run workflow).
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is this version already released?
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ver.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - if: steps.ver.outputs.exists == 'false'
+        run: npm ci && npm test && node scripts/package.js
+      - name: Publish release
+        if: steps.ver.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          PRE=""; case "$TAG" in *-*) PRE="--prerelease";; esac
+          {
+            echo '**Mac:** download `ShowControl-mac.zip`, open it, then double-click **Show Control.command** in the folder.'
+            echo 'The first time, macOS says it cannot check the app. Click Done, open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.'
+            echo
+            echo '**Windows:** download `ShowControl-windows.zip`, right-click it and choose **Extract All**, then double-click **Start Show Control.bat**.'
+            echo
+            echo 'Nothing else to install. It starts in practice mode with simulated equipment, opens your browser, and shows a code to scan with your iPad.'
+          } > notes.md
+          gh release create "$TAG" dist/ShowControl-mac.zip dist/ShowControl-windows.zip \
+            --target "$GITHUB_SHA" --title "Show Control $TAG" --notes-file notes.md $PRE

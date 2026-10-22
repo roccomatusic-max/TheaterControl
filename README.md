@@ -23,7 +23,24 @@ pocketed phone can't fire anything, and an optional PIN.
   <img src="docs/screenshots/ipad-cam.png" width="49%" alt="Camera tab on iPad">
 </p>
 
-## Try it now (no hardware)
+## Easiest way to try it (Mac or Windows, nothing to install)
+
+1. Go to [Releases](https://github.com/roccomatusic-max/TheaterControl/releases) and download
+   **ShowControl-mac.zip** or **ShowControl-windows.zip**.
+2. Open the zip (on Windows: right-click → Extract All).
+3. Double-click **Show Control.command** (Mac) or **Start Show Control.bat** (Windows).
+   - **Mac, first time only:** macOS says it can't check the app for malware. Click **Done**, open
+     **System Settings → Privacy & Security**, scroll down and click **Open Anyway**, then enter your password.
+   - **Windows:** if "Windows protected your PC" appears, click **More info → Run anyway**. If the
+     firewall asks about Node.js, allow it on private networks.
+4. Your browser opens with a QR code. Scan it with the iPad camera to open the controls on the iPad.
+
+It starts in **practice mode** with simulated equipment. To use real gear, put your show file at
+`Show Control/show.json` in your home folder (start from `config/show.example.json`).
+
+To build the downloads yourself: `npm run package`. When `main` gets a new `version` in `package.json`, GitHub Actions publishes a release with both downloads.
+
+## Try it now (no hardware, for developers)
 
 ```bash
 npm install
