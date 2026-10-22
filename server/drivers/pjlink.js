@@ -1,60 +1,77 @@
-// Projectors / displays via PJLink class 1 (TCP 4352). Supported by Epson, Panasonic, NEC, Sony, Christie, Barco, etc.
-const net = require('net');
-const crypto = require('crypto');
+// Any PJLink projector or display (Epson, Panasonic, NEC, Sony, Christie, Barco, Optoma...).
+// PJLink only reports ok/warning/error health, never temperatures; the UI says so.
 const Driver = require('./base');
+const { pjlinkBatch, parseErst, parseLamps, inputLabel } = require('../lib/pjlink');
+const { CommandQueue } = require('../lib/line-session');
+const { result } = require('../lib/outcome');
+
+const POWER = { 0: 'standby', 1: 'on', 2: 'cooling', 3: 'warming' };
 
 class PJLinkDriver extends Driver {
-  constructor(cfg) { super(cfg); this.state = { power: null, shutter: null, input: null }; }
+  constructor(cfg) {
+    super(cfg);
+    this.kind = 'projector';
+    this.queue = new CommandQueue(150);
+    this.state = {
+      model: cfg.model || 'PJLink', protocol: 'PJLink', power: null, shutter: null, input: null,
+      inputs: Object.entries(cfg.inputs || {}).map(([code, label]) => ({ code, label })),
+      lamps: null, health: null, healthSource: 'PJLink ERST', temperatures: 'n/a', lastResult: null, info: {},
+    };
+  }
 
   start() {
     this.setStatus('connecting');
-    this.queue = Promise.resolve();
-    this.poll = setInterval(() => { this.req('POWR ?'); this.req('AVMT ?'); }, 5000);
-    this.req('POWR ?');
-    this.watchdog(15000);
+    this.identify();
+    this.poll();
+    this.pollTimer = setInterval(() => this.poll(), this.cfg.pollMs || 4000);
+    this.slowTimer = setInterval(() => this.batch(['LAMP ?']).then(([l]) => l.outcome === 'ok' && this.patch({ lamps: parseLamps(l.value) })), 60000);
   }
 
-  // PJLink closes the socket after idle, so each request is its own short connection.
-  req(body) {
-    this.queue = this.queue.then(() => new Promise(resolve => {
-      const sock = net.connect(this.cfg.port || 4352, this.cfg.host);
-      let buf = '', prefix = '';
-      const done = () => { sock.destroy(); resolve(); };
-      sock.setTimeout(3000, done);
-      sock.on('error', () => { this.setStatus('offline'); done(); });
-      sock.on('data', d => {
-        buf += d.toString();
-        if (!buf.includes('\r')) return;
-        const line = buf.split('\r')[0]; buf = '';
-        if (line.startsWith('PJLINK')) {
-          const [, auth, rand] = line.split(' ');
-          if (auth === '1') prefix = crypto.createHash('md5').update(rand + (this.cfg.password || '')).digest('hex');
-          sock.write(`${prefix}%1${body}\r`);
-        } else { this.seen(); this.onReply(line); done(); }
-      });
-    }));
-    return this.queue;
+  batch(bodies, priority) {
+    return this.queue.push(() => pjlinkBatch(this.cfg.host, this.cfg.port || 4352, this.cfg.password || '', bodies), priority);
   }
 
-  onReply(line) {
-    const m = line.match(/^%1(\w{4})=(.*)$/);
-    if (!m) return;
-    const [, cmd, val] = m;
-    if (val.startsWith('ERR')) return this.log(`${cmd} ${val}`, 'warn');
-    if (cmd === 'POWR' && val !== 'OK') this.patch({ power: { 0: 'off', 1: 'on', 2: 'cooling', 3: 'warming' }[val] || val });
-    if (cmd === 'AVMT' && val !== 'OK') this.patch({ shutter: val === '31' ? 'closed' : 'open' });
+  async identify() {
+    const [name, mfr, model, inst, lamps] = await this.batch(['NAME ?', 'INF1 ?', 'INF2 ?', 'INST ?', 'LAMP ?']);
+    const info = { name: name.value, manufacturer: mfr.value, model: model.value };
+    const patch = { info };
+    if (mfr.value || model.value) patch.model = [mfr.value, model.value].filter(Boolean).join(' ');
+    if (!this.cfg.inputs && inst.outcome === 'ok') patch.inputs = inst.value.split(/\s+/).filter(Boolean).map(code => ({ code, label: inputLabel(code) }));
+    if (lamps.outcome === 'ok') patch.lamps = parseLamps(lamps.value);
+    this.patch(patch);
+  }
+
+  async poll() {
+    if (this.queue.pendingPolls) return; // don't pile up polls behind a slow projector
+    const [pw, av, inp, er] = await this.batch(['POWR ?', 'AVMT ?', 'INPT ?', 'ERST ?']);
+    if (pw.outcome === 'offline' || pw.outcome === 'timeout') return this.setStatus('offline');
+    if (pw.outcome === 'auth_failed') { this.setStatus('offline'); return this.patch({ lastResult: { cmd: 'connect', ...pw, t: Date.now() } }); }
+    this.seen();
+    const patch = {};
+    if (pw.outcome === 'ok') patch.power = POWER[pw.value] || pw.value;
+    // AVMT ?: 11/31 = video muted (shutter closed); 10/20/21/30 = picture shown
+    if (av.outcome === 'ok') patch.shutter = ['11', '31'].includes(av.value) ? 'closed' : 'open';
+    else if (av.outcome === 'busy') patch.shutter = null; // standby: unknown, not "open"
+    if (inp.outcome === 'ok') patch.input = inp.value;
+    if (er.outcome === 'ok') patch.health = parseErst(er.value);
+    this.patch(patch);
   }
 
   async command(cmd, a = {}) {
+    let body;
     switch (cmd) {
-      case 'power': return this.req(`POWR ${a.on ? 1 : 0}`);
-      case 'shutter': this.patch({ shutter: a.closed ? 'closed' : 'open' }); return this.req(`AVMT ${a.closed ? 31 : 30}`);
-      case 'input': return this.req(`INPT ${a.input}`);
-      default: return super.command(cmd);
+      case 'power': body = `POWR ${a.on ? 1 : 0}`; break;
+      case 'shutter': body = `AVMT ${a.closed ? 31 : 30}`; break;
+      case 'input': body = `INPT ${a.input}`; break;
+      default: return result('not_sent', `PJLink has no "${cmd}" command`);
     }
+    const [r] = await this.batch([body], 'hi');
+    this.patch({ lastResult: { cmd: `${cmd} ${JSON.stringify(a)}`, ...r, t: Date.now() } });
+    setTimeout(() => this.poll(), 300); // read the real state back rather than assuming it
+    return r;
   }
 
-  stop() { super.stop(); clearInterval(this.poll); }
+  stop() { super.stop(); clearInterval(this.pollTimer); clearInterval(this.slowTimer); }
 }
 
 module.exports = PJLinkDriver;

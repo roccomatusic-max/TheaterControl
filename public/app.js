@@ -27,7 +27,14 @@ function connect() {
   ws.onmessage = e => handle(JSON.parse(e.data));
 }
 const send = m => ws?.readyState === 1 ? ws.send(JSON.stringify(m)) : toast('Not connected');
-const cmd = (device, c, args) => send({ t: 'cmd', device, cmd: c, args });
+// Every command gets a per-device result back; anything that didn't work is shown, never swallowed.
+let cmdSeq = 0; const pending = {};
+const GOOD = ['ok', 'accepted', 'sent'];
+function cmd(device, c, args) {
+  const id = ++cmdSeq;
+  send({ t: 'cmd', id, device, cmd: c, args });
+  return new Promise(res => { pending[id] = res; setTimeout(() => { if (pending[id]) { delete pending[id]; res([]); } }, 15000); });
+}
 function setConn(ok) { const c = $('#conn'); c.textContent = ok ? 'live' : 'offline'; c.className = 'pill ' + (ok ? 'ok' : 'off'); }
 
 function handle(m) {
@@ -35,7 +42,7 @@ function handle(m) {
   else if (m.t === 'auth-failed') { $('#pinErr').textContent = 'Wrong PIN'; localStorage.removeItem('pin'); $('#pin').hidden = false; }
   else if (m.t === 'init') {
     $('#pin').hidden = true;
-    S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui;
+    S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || [];
     S.clockSkew = m.show.now - Date.now();
     $('#showName').textContent = m.show.name;
     render();
@@ -46,10 +53,15 @@ function handle(m) {
   } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); (updaters.__show || []).forEach(fn => fn(S.show)); }
   else if (m.t === 'log') { S.log.push(m.entry); if (S.log.length > 300) S.log.shift(); (updaters.__log || []).forEach(fn => fn(m.entry)); }
   else if (m.t === 'error') toast(m.msg);
+  else if (m.t === 'result') {
+    pending[m.id]?.(m.results); delete pending[m.id];
+    const bad = m.results.filter(r => !GOOD.includes(r.outcome));
+    if (bad.length) toast(bad.map(r => `${r.name.split(' · ')[0]}: ${r.outcome.replace('_', ' ')}${r.detail ? ` (${r.detail})` : ''}`).join('\n'), 6000);
+  }
 }
 $('#pin form').addEventListener('submit', e => { e.preventDefault(); const pin = $('#pinInput').value; localStorage.setItem('pin', pin); send({ t: 'auth', pin }); });
 
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2500); }
+function toast(msg, ms = 2500) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), ms); }
 
 // ---------- chrome ----------
 function renderDots() {
@@ -67,14 +79,16 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, lx: lxTab, snd: sndTab, cam: camTab, sys: sysTab })[S.tab]());
+  main.replaceChildren(({ show: showTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab })[S.tab]());
 }
 
 // ---------- Show tab ----------
 const fmtDur = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 function actionText(a) {
-  const d = S.devices[a.device]?.name?.split(' · ')[0] || a.device, x = a.args || {};
-  const s = { cue: `Q${x.cue}`, start: `Q${x.cue}`, scene: `scene ${String(x.bank || 'a').toUpperCase()}${x.scene}`, preset: `preset ${x.preset}`, macro: `macro ${x.macro}`, shutter: x.closed ? 'shutter close' : 'shutter open' }[a.cmd] || a.cmd;
+  const grp = String(a.device).startsWith('group:') && S.groups.find(g => g.id === a.device.slice(6));
+  const d = grp ? grp.name : S.devices[a.device]?.name?.split(' · ')[0] || a.device, x = a.args || {};
+  const s = { cue: `Q${x.cue}`, start: `Q${x.cue}`, scene: `scene ${String(x.bank || 'a').toUpperCase()}${x.scene}`, preset: `preset ${x.preset}`, macro: `macro ${x.macro}`,
+    shutter: x.closed ? 'shutter close' : 'shutter open', power: x.on ? 'power on' : 'power off', input: `input ${x.input}` }[a.cmd] || a.cmd;
   return `${d} ${s}${a.delay ? ` +${a.delay}s` : ''}`;
 }
 function showTab() {
@@ -109,7 +123,7 @@ function showTab() {
   setTimeout(() => update(S.show));
 
   const eos = byType('eos')[0], qlab = byType('qlab')[0];
-  const quick = h('div', { class: 'grid' },
+  const quick = h('div', { class: 'grid' }, projectors().length > 0 && projQuick(),
     eos && h('div', { class: 'card' }, h('h3', {}, eos.name), eosStatus(eos.id),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'big', onclick: () => cmd(eos.id, 'go') }, 'LX GO'), h('button', { onclick: () => cmd(eos.id, 'back') }, 'Back'))),
     qlab && h('div', { class: 'card' }, h('h3', {}, qlab.name), qlabStatus(qlab.id),
@@ -235,6 +249,98 @@ function sndTab() {
   return out;
 }
 
+// ---------- Projection ----------
+const PROJ_TYPES = ['panasonic', 'pjlink'];
+const projectors = () => Object.values(S.devices).filter(d => PROJ_TYPES.includes(d.type));
+const POWER_TXT = { on: 'On', standby: 'Standby', warming: 'Warming up', cooling: 'Cooling down' };
+// Never show a value the projector didn't give: unknown is "—", not a guess.
+const powerText = s => s.power == null ? '—' : s.transition === 'cooling' && s.power !== 'on' ? 'Cooling down' : s.transition === 'warming' ? 'Warming up' : POWER_TXT[s.power] || s.power;
+const inputText = s => s.input == null ? '—' : (s.inputs.find(i => i.code === s.input)?.label || s.input);
+function confirmPower(names, on) {
+  return confirm(on ? `Power ON ${names}?` : `Power OFF ${names}?\n\nA projector that is turned off has to cool down for 1-2 minutes before it will turn on again.`);
+}
+
+function projQuick() {
+  const sum = h('div', { class: 'kv' });
+  const upd = () => {
+    const ps = projectors(); const st = k => ps.filter(p => p.state.shutter === k).length;
+    sum.replaceChildren(h('b', {}, 'Shutters'), h('span', {}, `${st('open')} open · ${st('closed')} closed${ps.length - st('open') - st('closed') ? ` · ${ps.length - st('open') - st('closed')} unknown` : ''}`),
+      h('b', {}, 'Power'), h('span', {}, ps.map(p => `${p.name.split(' · ')[0]} ${powerText(p.state)}`).join(' · ')));
+  };
+  projectors().forEach(p => onDevice(p.id, upd));
+  return h('div', { class: 'card' }, h('h3', {}, 'Projection'), sum,
+    h('div', { class: 'row', style: 'margin-top:8px' },
+      h('button', { class: 'big', onclick: () => cmd('group:all', 'shutter', { closed: true }) }, 'Close all shutters'),
+      h('button', { onclick: () => cmd('group:all', 'shutter', { closed: false }) }, 'Open all')));
+}
+
+function healthView(s) {
+  if (!s.health) return h('span', { class: 'dim', title: s.healthSource || '' }, s.healthSource && s.healthSource.startsWith('PJLink:') ? `— (${s.healthSource})` : '—');
+  return h('span', { class: 'health' }, Object.entries(s.health).map(([k, v]) => h('span', { class: `hb ${v}`, title: `${k}: ${v} (from ${s.healthSource})` }, k)));
+}
+
+function projCard(p) {
+  const kv = h('div', { class: 'kv' });
+  const shut = h('div', { class: 'row' }), pow = h('div', { class: 'row' }), ins = h('div', { class: 'inputs' }), last = h('div', { class: 'last' });
+  const badge = h('div', { class: 'shutterbadge' });
+  onDevice(p.id, d => {
+    const s = d.state;
+    badge.textContent = s.shutter == null ? 'SHUTTER —' : s.shutter === 'closed' ? 'SHUTTER CLOSED' : 'SHUTTER OPEN';
+    badge.className = `shutterbadge ${s.shutter || ''}`;
+    kv.replaceChildren(
+      h('b', {}, 'Power'), h('span', {}, powerText(s)),
+      h('b', {}, 'Input'), h('span', {}, inputText(s)),
+      h('b', {}, 'Lamps'), h('span', {}, s.lamps ? s.lamps.map((l, i) => h('span', { class: 'lamp', title: l.why || '' }, `L${i + 1} ${l.hours == null ? '—' : `${l.hours} h`}`)) : '—'),
+      h('b', {}, 'Health'), healthView(s),
+      h('b', {}, 'Temps'), h('span', { class: 'dim' }, typeof s.temperatures === 'string' ? s.temperatures : '—'),
+      h('b', {}, 'Model'), h('span', { class: 'dim' }, `${s.model} · ${s.protocol}`));
+    ins.replaceChildren(...s.inputs.map(i => {
+      const why = s.unavailableInputs?.[i.code];
+      return h('button', { class: `${s.input === i.code ? 'cur' : ''} ${why ? 'na' : ''}`, title: why || '', disabled: !!why, onclick: () => cmd(p.id, 'input', { input: i.code }) }, i.label);
+    }));
+    const r = s.lastResult;
+    last.textContent = r ? `Last: ${r.cmd} → ${r.outcome.replace('_', ' ')}${r.detail ? ` (${r.detail})` : ''}` : '';
+    last.className = `last ${r && !GOOD.includes(r.outcome) ? 'bad' : ''}`;
+  });
+  shut.append(h('button', { class: 'big', onclick: () => cmd(p.id, 'shutter', { closed: true }) }, 'Close'), h('button', { class: 'big', onclick: () => cmd(p.id, 'shutter', { closed: false }) }, 'Open'));
+  pow.append(h('button', { onclick: () => confirmPower(p.name, true) && cmd(p.id, 'power', { on: true }) }, 'Power on'),
+    h('button', { class: 'danger', onclick: () => confirmPower(p.name, false) && cmd(p.id, 'power', { on: false }) }, 'Power off'));
+  if (p.type === 'panasonic') pow.append(h('button', { onclick: () => confirm(`Move ${p.name}'s lens to its home position?`) && cmd(p.id, 'lensHome') }, 'Lens home'));
+  if (p.state.allowUnverified) pow.append(h('button', { title: 'Unverified for this model', onclick: () => cmd(p.id, 'freeze', { on: true }) }, 'Freeze ⚠'), h('button', { onclick: () => cmd(p.id, 'freeze', { on: false }) }, 'Unfreeze'));
+  return h('div', { class: 'card' }, h('h3', {}, p.name, statusPill(p.id)), badge, shut, kv, h('div', { class: 'sub' }, 'Input'), ins, h('div', { class: 'sub' }, 'Power'), pow, last);
+}
+
+function projTab() {
+  const ps = projectors();
+  if (!ps.length) return h('div', { class: 'card' }, 'No projectors configured.');
+  S.projGroup ||= 'all';
+  const g = S.groups.find(x => x.id === S.projGroup) || S.groups[0];
+  const members = ps.filter(p => g.members.includes(p.id));
+  const names = members.map(p => p.name.split(' · ')[0]).join(', ');
+  const target = `group:${g.id}`;
+  const report = h('div', { class: 'results' });
+  const run = async (c, args) => {
+    report.textContent = 'Sending…';
+    const res = await cmd(target, c, args);
+    report.replaceChildren(...res.map(r => h('div', { class: GOOD.includes(r.outcome) ? 'good' : 'bad' }, `${r.name.split(' · ')[0]}: ${r.outcome.replace('_', ' ')}${r.detail ? ` (${r.detail})` : ''}`)));
+  };
+  // inputs every member shares (same codes), so a group input change means the same thing on each
+  const common = members.length && members.every(p => p.type === members[0].type)
+    ? members[0].state.inputs.filter(i => members.every(p => p.state.inputs.some(j => j.code === i.code))) : [];
+  return h('div', {},
+    h('div', { class: 'row', style: 'margin-bottom:10px' }, S.groups.map(x => h('button', { class: x.id === g.id ? 'on always' : 'always', onclick: () => { S.projGroup = x.id; render(); } }, x.name))),
+    h('div', { class: 'card', style: 'margin-bottom:10px' }, h('h3', {}, `${g.name} · ${members.length} projector${members.length === 1 ? '' : 's'}`),
+      h('div', { class: 'row' },
+        h('button', { class: 'big', onclick: () => run('shutter', { closed: true }) }, 'Close shutters'),
+        h('button', { class: 'big', onclick: () => run('shutter', { closed: false }) }, 'Open shutters'),
+        h('button', { onclick: () => confirmPower(names, true) && run('power', { on: true }) }, 'Power on'),
+        h('button', { class: 'danger', onclick: () => confirmPower(names, false) && run('power', { on: false }) }, 'Power off')),
+      common.length > 0 && h('div', { class: 'inputs', style: 'margin-top:8px' }, common.map(i => h('button', { onclick: () => run('input', { input: i.code }) }, i.label))),
+      h('div', { class: 'note' }, 'Group commands go to each projector at the same time; they are not frame-synchronised. Each projector reports its own result.'),
+      report),
+    h('div', { class: 'grid' }, members.map(projCard)));
+}
+
 // ---------- Cameras ----------
 function simView(camId) {
   // Stand-in for a real video feed: a virtual stage that pans/zooms with the simulated camera.
@@ -342,15 +448,8 @@ function sysTab() {
   log.append(...S.log.map(line));
   (updaters.__log ||= []).push(e => { const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20; log.append(line(e)); if (atBottom) log.scrollTop = log.scrollHeight; });
   setTimeout(() => (log.scrollTop = log.scrollHeight));
-  const projs = byType('pjlink').map(p => {
-    const kv = h('div', { class: 'kv' }); onDevice(p.id, d => kv.replaceChildren(h('b', {}, 'Power'), h('span', {}, d.state.power ?? '—'), h('b', {}, 'Shutter'), h('span', {}, d.state.shutter ?? '—')));
-    return h('div', { class: 'card' }, h('h3', {}, p.name, statusPill(p.id)), kv,
-      h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { onclick: () => confirm(`Power ON ${p.name}?`) && cmd(p.id, 'power', { on: true }) }, 'Power on'),
-        h('button', { onclick: () => confirm(`Power OFF ${p.name}?`) && cmd(p.id, 'power', { on: false }) }, 'Power off'),
-        h('button', { onclick: () => cmd(p.id, 'shutter', { closed: true }) }, 'Shutter close'), h('button', { onclick: () => cmd(p.id, 'shutter', { closed: false }) }, 'Shutter open')));
-  });
   const devs = h('div', { class: 'kv' }, Object.values(S.devices).map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
-  return h('div', { class: 'grid' }, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs), ...projs,
+  return h('div', { class: 'grid' }, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Log'), log));
 }
 
