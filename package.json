@@ -1,6 +1,6 @@
 {
   "name": "show-control",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Show control for theatre: ETC Eos, Yamaha TF, QLab, PTZ cameras, projectors from an iPad",
   "main": "server/index.js",
   "scripts": {
