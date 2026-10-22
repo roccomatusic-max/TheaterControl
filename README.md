@@ -35,8 +35,12 @@ pocketed phone can't fire anything, and an optional PIN.
      firewall asks about Node.js, allow it on private networks.
 4. Your browser opens with a QR code. Scan it with the iPad camera to open the controls on the iPad.
 
-It starts in **practice mode** with simulated equipment. To use real gear, put your show file at
-`Show Control/show.json` in your home folder (start from `config/show.example.json`).
+It starts in **practice mode** with simulated equipment. To use your real gear, open
+**System → Set up real equipment** on the iPad: type each device's address, tap **Test**, then **Go live**.
+Each device has a "How to set it up" list for the settings to turn on at the device. Show Control restarts
+itself into live mode, and your cue list comes with you. The setup is saved in `Show Control/show.json` in
+your home folder (`"live": false` there means practice mode). On the same screen you can make Show Control
+start automatically when the computer turns on; while it runs, a Mac is kept from going to sleep.
 
 To build the downloads yourself: `npm run package`. When `main` gets a new `version` in `package.json`, GitHub Actions publishes a release with both downloads.
 

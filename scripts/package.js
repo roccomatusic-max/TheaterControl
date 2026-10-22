@@ -64,9 +64,11 @@ PRACTICE MODE: until you set up your real equipment, everything runs
 against simulated devices (lighting desk, sound desk, QLab, cameras and
 projectors), so you can try every button safely.
 
-REAL EQUIPMENT: put your show file at  Show Control/show.json  in your
-home folder (start from app/config/show.example.json). The next start
-uses it instead of the simulators.
+REAL EQUIPMENT: on the iPad, open System > Set up real equipment. Type
+the address of each device, tap Test, then tap Go live. Each device has
+step-by-step help for the settings to turn on at the device itself.
+On that screen you can also make Show Control start by itself when this
+computer turns on.
 
 Node.js ${NODE_VERSION} is included (MIT licence, see app/runtime).
 `;
