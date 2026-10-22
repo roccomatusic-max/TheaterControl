@@ -10,7 +10,8 @@ and used from an iPad or phone in a browser. It works with no internet.
 | QLab 4/5 | OSC over UDP 53000 | GO, stop, panic, pause/resume, playhead, start any cue; shows playhead + running cues |
 | PTZ cameras | VISCA-over-IP (UDP 52381) or raw VISCA TCP (5678) | Joystick pan/tilt, zoom, focus, presets (tap = recall, hold = store), tally, home, power |
 | Camera video | go2rtc / MediaMTX → WebRTC, or MJPEG/HLS | Live view on the iPad, low latency |
-| Projectors / displays | PJLink (TCP 4352) | Power, shutter (AV mute), input |
+| Panasonic projectors (PT-DZ13K, PT-DZ770 series) | Panasonic LAN protocol, TCP 1024 (+ PJLink for health) | Power with confirmation, shutter, inputs, lamp hours, fan/lamp/temperature health, lens home |
+| Any PJLink projector / display | PJLink class 1, TCP 4352 | Power, shutter, inputs, lamp hours, health, make/model |
 | Anything else | Generic OSC out | Resolume, Millumin, Companion, TouchDesigner… |
 
 **Show cues** tie it together: one GO can fire an Eos cue, a QLab cue, a TF scene and camera
@@ -28,7 +29,7 @@ pocketed phone can't fire anything, and an optional PIN.
 npm install
 npm run sim        # fake Eos, TF5, QLab, 3 PTZ cams, projector + the server
 # open http://<this-computer>:8080 on your iPad or phone
-npm test           # end-to-end check against the simulators
+npm test           # end-to-end checks against the simulators (show + projection)
 ```
 
 The simulators speak the real protocols, so the same drivers talk to the real gear.
@@ -53,7 +54,10 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   `"passcode"`).
 - **PTZ**: set static IPs and enable VISCA-over-IP (Sony style, UDP 52381) or note the TCP port
   for PTZOptics-style raw VISCA (`"protocol": "visca-tcp", "port": 5678`).
-- **Projector**: enable PJLink and set its password in `"password"`.
+- **Panasonic projectors**: give each a static IP. If the projector has a web-control password,
+  put its login in `"username"` (usually `admin1`) and `"password"`. PJLink should stay enabled,
+  because that's where fan, lamp and temperature health comes from.
+- **Other projectors**: enable PJLink and set its password in `"password"`.
 
 ## Network
 
@@ -80,6 +84,32 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 - Use a dedicated 5 GHz access point for the control network with a hidden SSID and WPA2/3. Don't share it with the house or cast Wi-Fi.
 - Turn off automatic OS updates and sleep on the server during the run.
 - If the TF5 carries Dante, keep Dante on its own network or VLAN.
+
+## Projection
+
+The **Projection** tab works like Projector Control, without mapping. It has:
+
+- Groups from `"projection": { "groups": [...] }` plus a built-in **All projectors** group.
+  Show cues address a group as `"device": "group:foh"`.
+- **Close all shutters** on the Show tab, which blanks every projector in one tap.
+- A clear result from each projector for every command. The app keeps these outcomes separate: *busy*
+  (for example cooling down), *rejected*, *unsupported*, *timed out*, *password refused* and
+  *not sent*. A projector that's cooling down is never reported as "can't do that".
+
+It uses the same safety rules as Projector Control:
+
+- **Power is confirmed by reading it back.** A power command is never retried after a timeout, and the app queries the projector instead.
+- **Panasonic shutter polarity lives in one place** (`OSH:1` = closed).
+- **Commands only documented for sibling models aren't sent** unless that projector has
+  `"allowUnverified": true`. Freeze is the one such command today.
+- **The app never shows a number the projector didn't report.** Unknown values show as `—`, and the
+  Panasonic temperatures that aren't read show as "not read".
+- **An input the projector refuses while it's on and settled is crossed out** on that unit
+  (for example, SDI with no SDI board fitted).
+
+Nothing has been tested on a physical projector yet. Before the first show, use the
+[hardware validation steps](https://github.com/roccomatusic-max/Projectionmapping/blob/main/docs/HARDWARE-VALIDATION.md)
+from Projector Control.
 
 ## Video
 
@@ -111,6 +141,7 @@ Adding a device type means adding one file in `server/drivers/` and one line in 
 
 ## Next ideas
 
+- Projection mapping (shared with Projector Control's mapping module)
 - Cue editor in the UI (today cues are edited in `config/show.json`)
 - MIDI Show Control / MIDI timecode out (USB MIDI interface on the server)
 - LTC/MTC display and chase, Clear-Com/Green-GO comms status, Stream Deck via Bitfocus Companion

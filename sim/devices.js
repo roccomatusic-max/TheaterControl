@@ -127,24 +127,90 @@ function viscaSim(port, name) {
   s.bind(port, () => log(name, `VISCA/UDP on ${port}`));
 }
 
-// ---------- Projector (PJLink) ----------
-function pjlinkSim(port) {
-  let power = '0', av = '30';
+// ---------- Projectors ----------
+// Shared projector state with realistic warm-up / cool-down, served over PJLink and
+// (for Panasonic units) the NTCONTROL LAN protocol.
+const crypto = require('crypto');
+function projectorState(name, { warmMs = 6000, coolMs = 6000, inputs, lampHours = [1200, 1180] } = {}) {
+  const st = { name, power: 'standby', shutter: '1', input: inputs[0], lampHours, erst: '000000', inputs };
+  st.powerOn = () => { if (st.power !== 'standby') return false; st.power = 'warming'; setTimeout(() => (st.power = 'on'), warmMs); return true; };
+  st.powerOff = () => { if (st.power !== 'on') return false; st.power = 'cooling'; st.shutter = '1'; setTimeout(() => (st.power = 'standby'), coolMs); return true; };
+  return st;
+}
+function pjlinkSim(port, st, { password = '', pjInputs = ['11', '31', '32'] } = {}) {
+  const POW = { standby: '0', on: '1', cooling: '2', warming: '3' };
   net.createServer(sock => {
-    sock.write('PJLINK 0\r');
+    const rand = crypto.randomBytes(4).toString('hex');
+    const digest = password && crypto.createHash('md5').update(rand + password).digest('hex');
+    let authed = !password, buf = '';
+    sock.write(password ? `PJLINK 1 ${rand}\r` : 'PJLINK 0\r');
     sock.on('data', d => {
-      const m = d.toString().trim().match(/%1(\w{4}) (.+)/); if (!m) return;
-      const [, cmd, arg] = m;
-      if (cmd === 'POWR') { if (arg === '?') sock.write(`%1POWR=${power}\r`); else { power = arg === '1' ? '3' : '2'; setTimeout(() => (power = arg), 4000); log('pjlink', `power ${arg}`); sock.write('%1POWR=OK\r'); } }
-      else if (cmd === 'AVMT') { if (arg === '?') sock.write(`%1AVMT=${av}\r`); else { av = arg; sock.write('%1AVMT=OK\r'); } }
-      else sock.write(`%1${cmd}=OK\r`);
+      buf += d.toString();
+      let i;
+      while ((i = buf.indexOf('\r')) >= 0) {
+        let line = buf.slice(0, i); buf = buf.slice(i + 1);
+        if (!authed) { if (line.slice(0, 32) !== digest) { sock.end('PJLINK ERRA\r'); return; } authed = true; line = line.slice(32); }
+        const m = line.match(/^%1(\w{4}) (.+)$/); if (!m) continue;
+        const [, cmd, arg] = m, q = arg === '?', on = st.power === 'on';
+        const reply = v => sock.write(`%1${cmd}=${v}\r`);
+        if (cmd === 'POWR') q ? reply(POW[st.power]) : reply((arg === '1' ? st.powerOn() : st.powerOff()) || st.power === (arg === '1' ? 'on' : 'standby') ? 'OK' : 'ERR3');
+        else if (cmd === 'AVMT') { if (!on) reply('ERR3'); else if (q) reply(st.shutter === '1' ? '31' : '30'); else { st.shutter = ['11', '31'].includes(arg) ? '1' : '0'; reply('OK'); } }
+        else if (cmd === 'INPT') { if (!on) reply('ERR3'); else if (q) reply(st.pjInput || pjInputs[0]); else if (pjInputs.includes(arg)) { st.pjInput = arg; reply('OK'); } else reply('ERR2'); }
+        else if (cmd === 'ERST') reply(st.erst);
+        else if (cmd === 'LAMP') reply(st.lampHours.map(h => `${h} ${on ? 1 : 0}`).join(' '));
+        else if (cmd === 'INST') reply(pjInputs.join(' '));
+        else if (cmd === 'NAME') reply(st.name);
+        else if (cmd === 'INF1') reply(st.mfr || 'SIMCO');
+        else if (cmd === 'INF2') reply(st.model || 'PJ-1000');
+        else if (cmd === 'CLSS') reply('1');
+        else reply('ERR1');
+      }
     });
     sock.on('error', () => {});
-  }).listen(port, () => log('pjlink', `PJLink on ${port}`));
+  }).listen(port, () => log('pjlink', `${st.name} PJLink on ${port}${password ? ' (password)' : ''}`));
+}
+function panasonicSim(port, st, { user = 'admin1', password = '', closeAfterReply = false } = {}) {
+  net.createServer(sock => {
+    const rand = crypto.randomBytes(4).toString('hex');
+    const digest = password && crypto.createHash('md5').update(`${user}:${password}:${rand}`).digest('hex');
+    let first = true, buf = '';
+    sock.write(password ? `NTCONTROL 1 ${rand}\r` : 'NTCONTROL 0\r');
+    sock.on('data', d => {
+      buf += d.toString();
+      let i;
+      while ((i = buf.indexOf('\r')) >= 0) {
+        let line = buf.slice(0, i); buf = buf.slice(i + 1);
+        if (password && first) { if (line.slice(0, 32) !== digest) { sock.end('ERRA\r'); return; } line = line.slice(32); }
+        first = false;
+        if (!line.startsWith('00')) { sock.write('ERR5\r'); continue; }
+        const cmd = line.slice(2), [mn, arg] = cmd.split(':'), on = st.power === 'on';
+        const out = s => { sock.write(`00${s}\r`); if (closeAfterReply) sock.end(); };
+        if (mn === 'QPW') out(on || st.power === 'warming' ? '001' : '000');
+        else if (mn === 'PON') st.power === 'cooling' ? out('ER401') : (st.powerOn(), out('PON'));
+        else if (mn === 'POF') st.power === 'warming' ? out('ER401') : (st.powerOff(), out('POF'));
+        else if (mn === 'Q$L') out(String(st.lampHours[Number(arg) - 1] ?? 0).padStart(5, '0'));
+        else if (!on) out('ER401');
+        else if (mn === 'QSH') out(st.shutter);
+        else if (mn === 'OSH') { st.shutter = arg; log(st.name, `shutter ${arg === '1' ? 'CLOSED' : 'open'}`); out(cmd); }
+        else if (mn === 'QIN') out(st.input);
+        else if (mn === 'IIS') { if (!st.inputs.includes(arg)) out('ER401'); else { st.input = arg; out(cmd); } }
+        else if (mn === 'VXX') out(cmd);
+        else sock.write('ERR1\r');
+      }
+    });
+    sock.on('error', () => {});
+  }).listen(port, () => log('panasonic', `${st.name} NTCONTROL on ${port}${password ? ' (protect mode)' : ''}${closeAfterReply ? ', closes after each reply' : ''}`));
 }
 
 eosSim(13037);
 qlabSim(15300);
 tfSim(14928);
 viscaSim(15238, 'cam1'); viscaSim(15239, 'cam2'); viscaSim(15240, 'cam3');
-pjlinkSim(14352);
+// Two Panasonic PT-DZ13Ks (no SDI board fitted) and one PJLink-only projector
+const projL = projectorState('PROJ-L', { inputs: ['RG1', 'RG2', 'VID', 'DVI', 'HD1'], lampHours: [1520, 1498, 1533, 1507] });
+const projR = projectorState('PROJ-R', { inputs: ['RG1', 'RG2', 'VID', 'DVI', 'HD1'], lampHours: [980, 1001, 975, 990] });
+projR.erst = '100000'; // fan warning, to show health reporting
+const rear = Object.assign(projectorState('REAR-PJ', { inputs: ['31'] }), { mfr: 'EPSON', model: 'EB-L1100U' });
+panasonicSim(11024, projL, { password: 'panasonic' }); pjlinkSim(14353, projL, { password: 'panasonic' });
+panasonicSim(11025, projR, { closeAfterReply: true }); pjlinkSim(14354, projR);
+pjlinkSim(14352, rear, { password: 'epson' });

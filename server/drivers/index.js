@@ -4,5 +4,6 @@ module.exports = {
   'yamaha-tf': require('./yamaha-tf'),
   ptz: require('./ptz'),
   pjlink: require('./pjlink'),
+  panasonic: require('./panasonic'),
   osc: require('./osc-generic'),
 };

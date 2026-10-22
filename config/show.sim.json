@@ -1,67 +1,443 @@
 {
-  "server": { "port": 8080, "pin": "" },
+  "server": {
+    "port": 8080,
+    "pin": ""
+  },
   "show": {
     "name": "Simulated Musical",
     "timerLabel": "Act 1",
     "cues": [
-      { "number": 1, "label": "House to half", "note": "On SM call", "actions": [
-        { "device": "eos", "cmd": "cue", "args": { "list": 1, "cue": 1 } },
-        { "device": "qlab", "cmd": "start", "args": { "cue": "1" } },
-        { "device": "proj", "cmd": "shutter", "args": { "closed": false } }
-      ]},
-      { "number": 2, "label": "Preshow announcement", "actions": [
-        { "device": "qlab", "cmd": "start", "args": { "cue": "2" } },
-        { "device": "cam1", "cmd": "preset", "args": { "preset": 1 } }
-      ]},
-      { "number": 3, "label": "Overture", "actions": [
-        { "device": "eos", "cmd": "cue", "args": { "list": 1, "cue": 2 } },
-        { "device": "tf5", "cmd": "scene", "args": { "bank": "a", "scene": 1 } },
-        { "device": "qlab", "cmd": "start", "args": { "cue": "3" } },
-        { "device": "cam1", "cmd": "preset", "args": { "preset": 2 } },
-        { "device": "cam2", "cmd": "preset", "args": { "preset": 2 }, "delay": 2 }
-      ]},
-      { "number": 4, "label": "Opening number", "actions": [
-        { "device": "eos", "cmd": "go" },
-        { "device": "tf5", "cmd": "scene", "args": { "bank": "a", "scene": 2 } },
-        { "device": "cam1", "cmd": "preset", "args": { "preset": 3 } }
-      ]},
-      { "number": 5, "label": "Thunder + blackout", "actions": [
-        { "device": "eos", "cmd": "cue", "args": { "list": 1, "cue": 5 } },
-        { "device": "qlab", "cmd": "start", "args": { "cue": "4" } }
-      ]},
-      { "number": 6, "label": "Ballad", "actions": [
-        { "device": "eos", "cmd": "cue", "args": { "list": 1, "cue": 6 } },
-        { "device": "tf5", "cmd": "scene", "args": { "bank": "a", "scene": 3 } },
-        { "device": "cam2", "cmd": "preset", "args": { "preset": 4 } }
-      ]},
-      { "number": 7, "label": "Act 1 finale", "actions": [
-        { "device": "eos", "cmd": "cue", "args": { "list": 1, "cue": 8 } },
-        { "device": "qlab", "cmd": "start", "args": { "cue": "7" } }
-      ]}
+      {
+        "number": 1,
+        "label": "House to half",
+        "note": "On SM call",
+        "actions": [
+          {
+            "device": "eos",
+            "cmd": "cue",
+            "args": {
+              "list": 1,
+              "cue": 1
+            }
+          },
+          {
+            "device": "qlab",
+            "cmd": "start",
+            "args": {
+              "cue": "1"
+            }
+          },
+          {
+            "device": "group:all",
+            "cmd": "shutter",
+            "args": {
+              "closed": true
+            }
+          }
+        ]
+      },
+      {
+        "number": 2,
+        "label": "Preshow announcement",
+        "actions": [
+          {
+            "device": "qlab",
+            "cmd": "start",
+            "args": {
+              "cue": "2"
+            }
+          },
+          {
+            "device": "cam1",
+            "cmd": "preset",
+            "args": {
+              "preset": 1
+            }
+          }
+        ]
+      },
+      {
+        "number": 3,
+        "label": "Overture",
+        "actions": [
+          {
+            "device": "eos",
+            "cmd": "cue",
+            "args": {
+              "list": 1,
+              "cue": 2
+            }
+          },
+          {
+            "device": "tf5",
+            "cmd": "scene",
+            "args": {
+              "bank": "a",
+              "scene": 1
+            }
+          },
+          {
+            "device": "qlab",
+            "cmd": "start",
+            "args": {
+              "cue": "3"
+            }
+          },
+          {
+            "device": "cam1",
+            "cmd": "preset",
+            "args": {
+              "preset": 2
+            }
+          },
+          {
+            "device": "cam2",
+            "cmd": "preset",
+            "args": {
+              "preset": 2
+            },
+            "delay": 2
+          },
+          {
+            "device": "group:foh",
+            "cmd": "shutter",
+            "args": {
+              "closed": false
+            }
+          }
+        ]
+      },
+      {
+        "number": 4,
+        "label": "Opening number",
+        "actions": [
+          {
+            "device": "eos",
+            "cmd": "go"
+          },
+          {
+            "device": "tf5",
+            "cmd": "scene",
+            "args": {
+              "bank": "a",
+              "scene": 2
+            }
+          },
+          {
+            "device": "cam1",
+            "cmd": "preset",
+            "args": {
+              "preset": 3
+            }
+          }
+        ]
+      },
+      {
+        "number": 5,
+        "label": "Thunder + blackout",
+        "actions": [
+          {
+            "device": "eos",
+            "cmd": "cue",
+            "args": {
+              "list": 1,
+              "cue": 5
+            }
+          },
+          {
+            "device": "qlab",
+            "cmd": "start",
+            "args": {
+              "cue": "4"
+            }
+          },
+          {
+            "device": "group:all",
+            "cmd": "shutter",
+            "args": {
+              "closed": true
+            }
+          }
+        ]
+      },
+      {
+        "number": 6,
+        "label": "Ballad",
+        "actions": [
+          {
+            "device": "eos",
+            "cmd": "cue",
+            "args": {
+              "list": 1,
+              "cue": 6
+            }
+          },
+          {
+            "device": "tf5",
+            "cmd": "scene",
+            "args": {
+              "bank": "a",
+              "scene": 3
+            }
+          },
+          {
+            "device": "cam2",
+            "cmd": "preset",
+            "args": {
+              "preset": 4
+            }
+          },
+          {
+            "device": "group:cyc",
+            "cmd": "shutter",
+            "args": {
+              "closed": false
+            }
+          }
+        ]
+      },
+      {
+        "number": 7,
+        "label": "Act 1 finale",
+        "actions": [
+          {
+            "device": "eos",
+            "cmd": "cue",
+            "args": {
+              "list": 1,
+              "cue": 8
+            }
+          },
+          {
+            "device": "qlab",
+            "cmd": "start",
+            "args": {
+              "cue": "7"
+            }
+          }
+        ]
+      }
     ]
   },
   "ui": {
-    "faders": { "channels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], "dcas": [0, 1, 2, 3, 4, 5, 6, 7] },
+    "faders": {
+      "channels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "dcas": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
     "eosQuick": [
-      { "label": "Preshow", "cmd": "cue", "args": { "list": 1, "cue": 1 } },
-      { "label": "Work lights", "cmd": "macro", "args": { "macro": 901 } },
-      { "label": "House full", "cmd": "macro", "args": { "macro": 902 } },
-      { "label": "Blackout", "cmd": "macro", "args": { "macro": 903 } }
+      {
+        "label": "Preshow",
+        "cmd": "cue",
+        "args": {
+          "list": 1,
+          "cue": 1
+        }
+      },
+      {
+        "label": "Work lights",
+        "cmd": "macro",
+        "args": {
+          "macro": 901
+        }
+      },
+      {
+        "label": "House full",
+        "cmd": "macro",
+        "args": {
+          "macro": 902
+        }
+      },
+      {
+        "label": "Blackout",
+        "cmd": "macro",
+        "args": {
+          "macro": 903
+        }
+      }
     ]
   },
   "devices": [
-    { "id": "eos", "type": "eos", "name": "ETC Eos", "host": "127.0.0.1", "port": 13037, "transport": "tcp" },
-    { "id": "qlab", "type": "qlab", "name": "QLab", "host": "127.0.0.1", "port": 15300 },
-    { "id": "tf5", "type": "yamaha-tf", "name": "Yamaha TF5", "host": "127.0.0.1", "port": 14928, "channels": 32, "dcas": 8 },
-    { "id": "cam1", "type": "ptz", "name": "Cam 1 · FOH centre", "host": "127.0.0.1", "port": 15238, "protocol": "visca-ip",
-      "presets": [{ "n": 1, "label": "Wide" }, { "n": 2, "label": "Pit" }, { "n": 3, "label": "CS mid" }, { "n": 4, "label": "DSL" }, { "n": 5, "label": "DSR" }],
-      "stream": { "type": "sim" } },
-    { "id": "cam2", "type": "ptz", "name": "Cam 2 · Balcony", "host": "127.0.0.1", "port": 15239, "protocol": "visca-ip",
-      "presets": [{ "n": 1, "label": "Wide" }, { "n": 2, "label": "Conductor" }, { "n": 4, "label": "Ballad spot" }],
-      "stream": { "type": "sim" } },
-    { "id": "cam3", "type": "ptz", "name": "Cam 3 · Pit / MD", "host": "127.0.0.1", "port": 15240, "protocol": "visca-ip",
-      "presets": [{ "n": 1, "label": "MD" }, { "n": 2, "label": "Keys" }],
-      "stream": { "type": "sim" } },
-    { "id": "proj", "type": "pjlink", "name": "Projector", "host": "127.0.0.1", "port": 14352 }
-  ]
+    {
+      "id": "eos",
+      "type": "eos",
+      "name": "ETC Eos",
+      "host": "127.0.0.1",
+      "port": 13037,
+      "transport": "tcp"
+    },
+    {
+      "id": "qlab",
+      "type": "qlab",
+      "name": "QLab",
+      "host": "127.0.0.1",
+      "port": 15300
+    },
+    {
+      "id": "tf5",
+      "type": "yamaha-tf",
+      "name": "Yamaha TF5",
+      "host": "127.0.0.1",
+      "port": 14928,
+      "channels": 32,
+      "dcas": 8
+    },
+    {
+      "id": "cam1",
+      "type": "ptz",
+      "name": "Cam 1 \u00b7 FOH centre",
+      "host": "127.0.0.1",
+      "port": 15238,
+      "protocol": "visca-ip",
+      "presets": [
+        {
+          "n": 1,
+          "label": "Wide"
+        },
+        {
+          "n": 2,
+          "label": "Pit"
+        },
+        {
+          "n": 3,
+          "label": "CS mid"
+        },
+        {
+          "n": 4,
+          "label": "DSL"
+        },
+        {
+          "n": 5,
+          "label": "DSR"
+        }
+      ],
+      "stream": {
+        "type": "sim"
+      }
+    },
+    {
+      "id": "cam2",
+      "type": "ptz",
+      "name": "Cam 2 \u00b7 Balcony",
+      "host": "127.0.0.1",
+      "port": 15239,
+      "protocol": "visca-ip",
+      "presets": [
+        {
+          "n": 1,
+          "label": "Wide"
+        },
+        {
+          "n": 2,
+          "label": "Conductor"
+        },
+        {
+          "n": 4,
+          "label": "Ballad spot"
+        }
+      ],
+      "stream": {
+        "type": "sim"
+      }
+    },
+    {
+      "id": "cam3",
+      "type": "ptz",
+      "name": "Cam 3 \u00b7 Pit / MD",
+      "host": "127.0.0.1",
+      "port": 15240,
+      "protocol": "visca-ip",
+      "presets": [
+        {
+          "n": 1,
+          "label": "MD"
+        },
+        {
+          "n": 2,
+          "label": "Keys"
+        }
+      ],
+      "stream": {
+        "type": "sim"
+      }
+    },
+    {
+      "id": "projL",
+      "type": "panasonic",
+      "name": "Proj L \u00b7 FOH left",
+      "model": "pt-dz13k",
+      "host": "127.0.0.1",
+      "port": 11024,
+      "username": "admin1",
+      "password": "panasonic",
+      "pjlinkPort": 14353,
+      "gapMs": 200,
+      "warmupMs": 8000,
+      "cooldownMs": 8000
+    },
+    {
+      "id": "projR",
+      "type": "panasonic",
+      "name": "Proj R \u00b7 FOH right",
+      "model": "pt-dz13k",
+      "host": "127.0.0.1",
+      "port": 11025,
+      "pjlinkPort": 14354,
+      "gapMs": 200,
+      "warmupMs": 8000,
+      "cooldownMs": 8000
+    },
+    {
+      "id": "rear",
+      "type": "pjlink",
+      "name": "Rear \u00b7 Cyc",
+      "host": "127.0.0.1",
+      "port": 14352,
+      "password": "epson",
+      "inputs": {
+        "11": "Computer",
+        "31": "HDMI 1"
+      }
+    }
+  ],
+  "projection": {
+    "groups": [
+      {
+        "id": "foh",
+        "name": "FOH pair",
+        "members": [
+          "projL",
+          "projR"
+        ]
+      },
+      {
+        "id": "cyc",
+        "name": "Cyc",
+        "members": [
+          "rear"
+        ]
+      }
+    ]
+  }
 }

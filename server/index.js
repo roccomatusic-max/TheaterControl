@@ -43,11 +43,36 @@ function queueDevice(d) {
   }, 50);
 }
 
+// Projector groups from config, plus a built-in "all" group of every projector.
+const projectors = () => [...devices.values()].filter(d => d.kind === 'projector');
+const groups = () => [
+  { id: 'all', name: 'All projectors', members: projectors().map(d => d.id) },
+  ...(cfg.projection?.groups || []).map(g => ({ ...g, members: g.members.filter(id => devices.has(id)) })),
+];
+
+const LEVEL = { ok: 'cmd', accepted: 'cmd', sent: 'cmd', busy: 'warn', timeout: 'warn' };
+// Runs one action against a device or a group ("group:<id>"); returns one result per device.
 async function runAction(a, source) {
-  const d = devices.get(a.device);
-  if (!d) throw new Error(`no device "${a.device}"`);
-  await d.command(a.cmd, a.args || {});
-  if (a.cmd !== 'move' && a.cmd !== 'zoom') log({ device: d.id, level: 'cmd', msg: `${a.cmd} ${JSON.stringify(a.args || {})} (${source})`, t: Date.now() });
+  let targets;
+  if (String(a.device).startsWith('group:')) {
+    const g = groups().find(x => x.id === a.device.slice(6));
+    if (!g) throw new Error(`no projector group "${a.device.slice(6)}"`);
+    targets = g.members.map(id => devices.get(id));
+  } else {
+    const d = devices.get(a.device);
+    if (!d) throw new Error(`no device "${a.device}"`);
+    targets = [d];
+  }
+  // Group commands go out concurrently; each projector reports its own outcome.
+  return Promise.all(targets.map(async d => {
+    let r;
+    try { r = (await d.command(a.cmd, a.args || {})) || { outcome: 'sent' }; }
+    catch (e) { r = { outcome: 'not_sent', detail: e.message }; }
+    if (a.cmd !== 'move' && a.cmd !== 'zoom') {
+      log({ device: d.id, level: LEVEL[r.outcome] || 'error', msg: `${a.cmd} ${JSON.stringify(a.args || {})} → ${r.outcome}${r.detail ? `: ${r.detail}` : ''} (${source})`, t: Date.now() });
+    }
+    return { device: d.id, name: d.name, ...r };
+  }));
 }
 
 // ---------- show cue stack ----------
@@ -95,7 +120,7 @@ wss.on('connection', (ws, req) => {
   ws.authed = !PIN;
   const hello = () => ws.send(JSON.stringify({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
-    ui: cfg.ui || {},
+    ui: cfg.ui || {}, groups: groups(),
   }));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
 
@@ -108,7 +133,10 @@ wss.on('connection', (ws, req) => {
     }
     if (!ws.authed) return;
     try {
-      if (m.t === 'cmd') await runAction(m, who);
+      if (m.t === 'cmd') {
+        const results = await runAction(m, who);
+        if (m.id) ws.send(JSON.stringify({ t: 'result', id: m.id, results }));
+      }
       else if (m.t === 'show') {
         if (m.action === 'go') fireCue(show.index, who);
         else if (m.action === 'fire') fireCue(Number(m.index), who);
