@@ -13,6 +13,10 @@ const cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 const PORT = Number(process.env.PORT || cfg.server?.port || 8080);
 const PIN = process.env.SHOW_PIN || cfg.server?.pin || '';
+// Where cue edits are saved (the launcher points practice mode at a copy in the user's folder),
+// and where cue position + timers are kept so a restart mid-show resumes at the same cue.
+const SAVE_PATH = process.env.SHOW_SAVE_PATH || cfgPath;
+const STATE_PATH = process.env.SHOW_STATE_FILE ?? path.join(path.dirname(SAVE_PATH), `.${path.basename(SAVE_PATH, '.json')}.state.json`);
 
 // ---------- devices ----------
 const logRing = [];
@@ -86,7 +90,84 @@ const show = {
   lastFired: null,
   timers: { show: { start: null, acc: 0 }, act: { start: null, acc: 0 }, label: cfg.show?.timerLabel || 'Act 1' },
 };
-const showSnapshot = () => ({ name: show.name, cues: show.cues, index: show.index, lastFired: show.lastFired, timers: show.timers, now: Date.now() });
+const showSnapshot = () => ({ name: show.name, cues: show.cues, index: show.index, lastFired: show.lastFired, timers: show.timers, now: Date.now(), emergency: show.emergency || null });
+
+// Atomic write: a power cut mid-write never leaves a half-written file.
+function writeJson(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
+function loadState() {
+  if (!STATE_PATH) return;
+  try {
+    const st = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    show.index = Math.max(0, Math.min(show.cues.length, st.index ?? 0));
+    show.lastFired = st.lastFired ?? null;
+    for (const k of ['show', 'act']) if (st.timers?.[k]) show.timers[k] = st.timers[k];
+    console.log(`Resumed at cue position ${show.index + 1} (saved ${new Date(st.savedAt).toLocaleString()})`);
+  } catch { /* first run */ }
+}
+let stateTimer = null;
+function saveState() {
+  if (!STATE_PATH || stateTimer) return;
+  stateTimer = setTimeout(() => {
+    stateTimer = null;
+    try { writeJson(STATE_PATH, { index: show.index, lastFired: show.lastFired, timers: show.timers, savedAt: Date.now() }); }
+    catch (e) { log({ device: 'core', level: 'warn', msg: `could not save show position: ${e.message}`, t: Date.now() }); }
+  }, 200);
+}
+loadState();
+
+// Cue list edits from the iPad. Validated, backed up, then written to the show file.
+function validateCues(cues) {
+  if (!Array.isArray(cues)) throw new Error('cues must be a list');
+  return cues.map((c, i) => {
+    if (!c || typeof c.label !== 'string') throw new Error(`cue ${i + 1}: needs a name`);
+    const actions = (c.actions || []).map((a, j) => {
+      const where = `cue ${i + 1}, action ${j + 1}`;
+      if (typeof a.device !== 'string' || typeof a.cmd !== 'string') throw new Error(`${where}: needs a device and a command`);
+      if (!a.device.startsWith('group:') && !devices.has(a.device)) throw new Error(`${where}: unknown device "${a.device}"`);
+      const delay = Number(a.delay || 0);
+      if (!(delay >= 0 && delay <= 600)) throw new Error(`${where}: delay must be 0-600 seconds`);
+      return { device: a.device, cmd: a.cmd, ...(a.args && Object.keys(a.args).length ? { args: a.args } : {}), ...(delay ? { delay } : {}) };
+    });
+    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(c.note ? { note: String(c.note) } : {}), actions };
+  });
+}
+function saveCues(cues, who) {
+  const clean = validateCues(cues);
+  let onDisk = cfg;
+  try { onDisk = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf8')); } catch { /* first save of a practice copy */ }
+  if (fs.existsSync(SAVE_PATH)) fs.copyFileSync(SAVE_PATH, `${SAVE_PATH}.bak`);
+  writeJson(SAVE_PATH, { ...onDisk, show: { ...(onDisk.show || {}), cues: clean } });
+  show.cues = clean;
+  show.index = Math.min(show.index, clean.length);
+  if (show.lastFired != null && show.lastFired >= clean.length) show.lastFired = null;
+  log({ device: 'show', level: 'cmd', msg: `cue list saved (${clean.length} cues) by ${who}`, t: Date.now() });
+  saveState();
+}
+
+// Emergency stop: everything that makes noise, light or movement, all at once.
+// Default: QLab panic, close every projector shutter, stop every PTZ camera. Add more in
+// config "safety": { "emergency": [ { "device": "eos", "cmd": "macro", "args": { "macro": 999 } } ] }
+async function emergencyStop(who) {
+  const actions = [
+    ...[...devices.values()].filter(d => d.type === 'qlab').map(d => ({ device: d.id, cmd: 'panic' })),
+    ...(projectors().length ? [{ device: 'group:all', cmd: 'shutter', args: { closed: true } }] : []),
+    ...[...devices.values()].filter(d => d.type === 'ptz').flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
+    ...(cfg.safety?.emergency || []),
+  ];
+  log({ device: 'show', level: 'error', msg: `EMERGENCY STOP by ${who}`, t: Date.now() });
+  const results = (await Promise.all(actions.map(a => runAction(a, `EMERGENCY ${who}`).catch(e => [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }])))).flat()
+    .filter(r => !(r.outcome === 'sent' && devices.get(r.device)?.type === 'ptz'))
+    // a projector in standby is already dark, so a refused shutter-close there is not a problem
+    .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
+  show.emergency = { at: Date.now(), by: who, results };
+  broadcast({ t: 'show', show: showSnapshot() });
+  return results;
+}
 function fireCue(i, source) {
   const cue = show.cues[i];
   if (!cue) return;
@@ -97,12 +178,14 @@ function fireCue(i, source) {
     setTimeout(() => runAction(a, `cue ${cue.number ?? i + 1}`).catch(e => log({ device: a.device, level: 'error', msg: e.message, t: Date.now() })), (a.delay || 0) * 1000);
   }
   broadcast({ t: 'show', show: showSnapshot() });
+  saveState();
 }
 function timer(name, op) {
   const tm = show.timers[name]; if (!tm) return;
   if (op === 'start' && !tm.start) tm.start = Date.now();
   if (op === 'stop' && tm.start) { tm.acc += Date.now() - tm.start; tm.start = null; }
   if (op === 'reset') { tm.acc = 0; tm.start = tm.start ? Date.now() : null; }
+  saveState();
 }
 
 // ---------- HTTP + WS ----------
@@ -169,12 +252,19 @@ wss.on('connection', (ws, req) => {
       else if (m.t === 'show') {
         if (m.action === 'go') fireCue(show.index, who);
         else if (m.action === 'fire') fireCue(Number(m.index), who);
-        else if (m.action === 'standby') show.index = Math.max(0, Math.min(show.cues.length, Number(m.index)));
+        else if (m.action === 'standby') { show.index = Math.max(0, Math.min(show.cues.length, Number(m.index))); saveState(); }
         else if (m.action === 'timer') timer(m.timer, m.op);
+        else if (m.action === 'clear-emergency') show.emergency = null;
+        broadcast({ t: 'show', show: showSnapshot() });
+      }
+      else if (m.t === 'emergency') await emergencyStop(who);
+      else if (m.t === 'save-cues') {
+        saveCues(m.cues, who);
+        ws.send(JSON.stringify({ t: 'saved', id: m.id }));
         broadcast({ t: 'show', show: showSnapshot() });
       }
     } catch (e) {
-      ws.send(JSON.stringify({ t: 'error', msg: e.message }));
+      ws.send(JSON.stringify({ t: 'error', id: m.id, msg: e.message }));
       log({ device: m.device || 'core', level: 'error', msg: e.message, t: Date.now() });
     }
   });
@@ -192,3 +282,6 @@ module.exports = { server, lanAddresses };
 
 function shutdown() { for (const d of devices.values()) d.stop(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+// A bug in one driver must not take the whole show down: log it and keep running.
+process.on('uncaughtException', e => log({ device: 'core', level: 'error', msg: `internal error (kept running): ${e.stack || e.message}`, t: Date.now() }));
+process.on('unhandledRejection', e => log({ device: 'core', level: 'error', msg: `internal error (kept running): ${e?.stack || e}`, t: Date.now() }));

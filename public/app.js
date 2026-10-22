@@ -30,12 +30,19 @@ const send = m => ws?.readyState === 1 ? ws.send(JSON.stringify(m)) : toast('Not
 // Every command gets a per-device result back; anything that didn't work is shown, never swallowed.
 let cmdSeq = 0; const pending = {};
 const GOOD = ['ok', 'accepted', 'sent'];
+const OUTCOME_WORDS = { busy: 'warming up, try again', offline: 'not connected', timeout: 'no answer', not_sent: 'not sent', rejected: 'refused', auth_failed: 'wrong password', fault: 'fault' };
 function cmd(device, c, args) {
   const id = ++cmdSeq;
   send({ t: 'cmd', id, device, cmd: c, args });
   return new Promise(res => { pending[id] = res; setTimeout(() => { if (pending[id]) { delete pending[id]; res([]); } }, 15000); });
 }
-function setConn(ok) { const c = $('#conn'); c.textContent = ok ? 'live' : 'offline'; c.className = 'pill ' + (ok ? 'ok' : 'off'); }
+let offlineTimer;
+function setConn(ok) {
+  const c = $('#conn'); c.textContent = ok ? 'live' : 'offline'; c.className = 'pill ' + (ok ? 'ok' : 'off');
+  clearTimeout(offlineTimer);
+  if (ok) $('#offline').hidden = true;
+  else offlineTimer = setTimeout(() => ($('#offline').hidden = false), 1200); // brief blips don't flash the warning
+}
 
 function handle(m) {
   if (m.t === 'auth-required') { $('#pin').hidden = false; $('#pinInput').focus(); const saved = localStorage.getItem('pin'); if (saved) send({ t: 'auth', pin: saved }); }
@@ -45,14 +52,17 @@ function handle(m) {
     S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || [];
     S.clockSkew = m.show.now - Date.now();
     $('#showName').textContent = m.show.name;
+    renderEmergency();
     render();
   } else if (m.t === 'device') {
     S.devices[m.device.id] = m.device;
     (updaters[m.device.id] || []).forEach(fn => fn(m.device));
+    (updaters.__anyDevice || []).forEach(fn => fn());
     renderDots();
-  } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); (updaters.__show || []).forEach(fn => fn(S.show)); }
+  } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); renderEmergency(); (updaters.__show || []).forEach(fn => fn(S.show)); }
+  else if (m.t === 'saved') { pending[m.id]?.(true); delete pending[m.id]; }
   else if (m.t === 'log') { S.log.push(m.entry); if (S.log.length > 300) S.log.shift(); (updaters.__log || []).forEach(fn => fn(m.entry)); }
-  else if (m.t === 'error') toast(m.msg);
+  else if (m.t === 'error') { if (m.id && pending[m.id]) { pending[m.id](m.msg); delete pending[m.id]; } else toast(m.msg); }
   else if (m.t === 'result') {
     pending[m.id]?.(m.results); delete pending[m.id];
     const bad = m.results.filter(r => !GOOD.includes(r.outcome));
@@ -72,14 +82,44 @@ const lockBtn = $('#lockBtn');
 function setLock(on) { document.body.classList.toggle('locked', on); lockBtn.textContent = on ? '🔒' : '🔓'; localStorage.setItem('locked', on ? '1' : ''); }
 lockBtn.addEventListener('click', () => setLock(!document.body.classList.contains('locked')));
 setLock(!!localStorage.getItem('locked'));
+
+// Emergency stop: hold 1.5 s. Works even when the screen is locked.
+(() => {
+  const b = $('#estop'); let t;
+  const cancel = () => { clearTimeout(t); b.classList.remove('holding'); };
+  b.addEventListener('pointerdown', e => {
+    b.setPointerCapture(e.pointerId); b.classList.add('holding');
+    t = setTimeout(() => { b.classList.remove('holding'); navigator.vibrate?.(200); send({ t: 'emergency' }); }, 1500);
+  });
+  b.addEventListener('pointerup', cancel); b.addEventListener('pointercancel', cancel);
+  b.addEventListener('click', e => e.preventDefault());
+})();
+function renderEmergency() {
+  const bar = $('#emergencyBar'), em = S.show?.emergency;
+  bar.hidden = !em;
+  if (!em) return;
+  const bad = em.results.filter(r => !GOOD.includes(r.outcome));
+  bar.replaceChildren(h('b', {}, `EMERGENCY STOP at ${new Date(em.at).toLocaleTimeString([], { hour12: false })}`),
+    h('span', { class: 'r' }, bad.length ? `Not confirmed: ${bad.map(r => `${r.name.split(' · ')[0]} (${OUTCOME_WORDS[r.outcome] || r.outcome.replace('_', ' ')})`).join(', ')}` : `QLab stopped, shutters closed, cameras stopped (from ${em.by})`),
+    h('button', { class: 'always', onclick: () => send({ t: 'show', action: 'clear-emergency' }) }, 'Clear'));
+}
+
+// Keep the iPad screen awake while the app is open (re-requested when the page comes back).
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator && document.visibilityState === 'visible' && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => (wakeLock = null)); } } catch { /* not allowed yet */ }
+}
+document.addEventListener('visibilitychange', keepAwake);
+document.addEventListener('pointerdown', keepAwake, { once: true });
+keepAwake();
 setInterval(() => { $('#clock').textContent = new Date(Date.now() + S.clockSkew).toLocaleTimeString([], { hour12: false }); (updaters.__tick || []).forEach(f => f()); }, 250);
 
 function render() {
   for (const k of Object.keys(updaters)) delete updaters[k];
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (S.tab === 'edit' ? 'show' : S.tab)));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab })[S.tab]());
+  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab })[S.tab]());
 }
 
 // ---------- Show tab ----------
@@ -91,10 +131,21 @@ function actionText(a) {
     shutter: x.closed ? 'shutter close' : 'shutter open', power: x.on ? 'power on' : 'power off', input: `input ${x.input}` }[a.cmd] || a.cmd;
   return `${d} ${s}${a.delay ? ` +${a.delay}s` : ''}`;
 }
+// Devices the standby cue needs that aren't online, so the operator knows before pressing GO.
+function cueDevices(cue) {
+  return [...new Set((cue?.actions || []).flatMap(a => String(a.device).startsWith('group:')
+    ? (S.groups.find(g => g.id === a.device.slice(6))?.members || []) : [a.device]))];
+}
+function warnLine(cue) {
+  const off = cueDevices(cue).map(id => S.devices[id]).filter(d => d && d.status !== 'online');
+  return off.length ? h('div', { class: 'warnline' }, `⚠ Not connected: ${off.map(d => d.name.split(' · ')[0]).join(', ')}`) : '';
+}
+
 function showTab() {
   let lastGo = 0;
   const go = h('button', { id: 'goBtn', onclick: () => { if (Date.now() - lastGo < 600) return; lastGo = Date.now(); send({ t: 'show', action: 'go' }); } }, 'GO');
   const stby = h('div', { class: 'standby' });
+  const warn = h('div');
   const list = h('div', { class: 'cuelist' });
   const tmr = (key, label) => {
     const t = h('div', { class: 't' }, '0:00:00');
@@ -109,7 +160,9 @@ function showTab() {
     const next = sh.cues[sh.index];
     go.disabled = !next;
     stby.replaceChildren(h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
-      h('div', { class: 'acts' }, next ? [next.note ? `${next.note} · ` : '', (next.actions || []).map(actionText).join(' · ')] : ''));
+      h('div', { class: 'acts' }, next ? [next.note ? `${next.note} · ` : '', (next.actions || []).map(actionText).join(' · ')] : ''),
+      warn);
+    warn.replaceChildren(warnLine(next));
     list.replaceChildren(...sh.cues.map((c, i) => h('div', { class: `cue ${i < sh.index ? 'done' : ''} ${i === sh.index ? 'next' : ''} ${i === sh.lastFired ? 'last' : ''}` },
       h('div', { class: 'n' }, c.number ?? i + 1),
       h('div', {}, h('div', {}, c.label), h('div', { class: 'tags' }, (c.actions || []).map(actionText).join(' · '))),
@@ -120,6 +173,7 @@ function showTab() {
     if (nx) list.scrollTop = Math.max(0, nx.offsetTop - list.offsetTop - 60);
   };
   (updaters.__show ||= []).push(update);
+  (updaters.__anyDevice ||= []).push(() => warn.replaceChildren(warnLine(S.show.cues[S.show.index])));
   setTimeout(() => update(S.show));
 
   const eos = byType('eos')[0], qlab = byType('qlab')[0];
@@ -131,6 +185,7 @@ function showTab() {
         h('button', { onclick: () => cmd(qlab.id, 'stop') }, 'Stop'), h('button', { class: 'danger', onclick: () => cmd(qlab.id, 'panic') }, 'Panic'))));
   return h('div', {},
     h('div', { class: 'showtop' }, stby, go),
+    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, h('button', { onclick: () => { S.tab = 'edit'; render(); } }, '✎ Edit cues')),
     h('div', { class: 'timers', style: 'margin-bottom:10px' }, tmr('show', 'Show'), tmr('act', S.show.timers.label)),
     quick,
     h('div', { class: 'card', style: 'margin-top:10px' }, h('h3', {}, 'Show cues'), list));
@@ -339,6 +394,114 @@ function projTab() {
       h('div', { class: 'note' }, 'Group commands go to each projector at the same time; they are not frame-synchronised. Each projector reports its own result.'),
       report),
     h('div', { class: 'grid' }, members.map(projCard)));
+}
+
+// ---------- Cue editor ----------
+// What each kind of device can do in a show cue, and the fields each command needs.
+// Field: [arg, type, default, label]; types: number, text, bool:<yes>/<no>, select:a|b, n1 (shown 1-based, stored 0-based)
+const CATALOG = {
+  eos: { cue: [['list', 'number', 1, 'Cue list'], ['cue', 'text', '', 'Cue']], go: [], back: [], macro: [['macro', 'number', 1, 'Macro']],
+    sub: [['sub', 'number', 1, 'Sub'], ['level', 'number', 1, 'Level (0-1)']], chan: [['chan', 'text', '', 'Channel(s)'], ['level', 'text', 'Full', 'Level']], cmdline: [['text', 'text', '', 'Command line']] },
+  qlab: { start: [['cue', 'text', '', 'Cue number']], go: [], stop: [], panic: [], pause: [], resume: [], playhead: [['cue', 'text', '', 'Cue number']] },
+  'yamaha-tf': { scene: [['bank', 'select:a|b', 'a', 'Bank'], ['scene', 'number', 1, 'Scene']],
+    level: [['strip', 'select:dca|ch|master', 'dca', 'Fader'], ['index', 'n1', 0, 'Number'], ['db', 'number', 0, 'Level dB']],
+    on: [['strip', 'select:ch|dca|master', 'ch', 'Fader'], ['index', 'n1', 0, 'Number'], ['on', 'bool:On|Off', true, 'Set to']] },
+  ptz: { preset: [['preset', 'number', 1, 'Preset']], home: [], tally: [['on', 'bool:On|Off', true, 'Tally']] },
+  projector: { shutter: [['closed', 'bool:Close|Open', true, 'Shutter']], power: [['on', 'bool:On|Off', true, 'Power']], input: [['input', 'input', '', 'Input']] },
+  osc: { send: [['address', 'text', '/', 'OSC address']] },
+};
+const CMD_LABEL = { cue: 'Fire cue', go: 'GO', back: 'Back', macro: 'Fire macro', sub: 'Sub level', chan: 'Channel level', cmdline: 'Command line',
+  start: 'Start cue', stop: 'Stop all', panic: 'Panic (fade out all)', pause: 'Pause all', resume: 'Resume all', playhead: 'Move playhead to',
+  scene: 'Recall scene', level: 'Set fader', on: 'Fader on/off', preset: 'Go to preset', home: 'Home', tally: 'Tally light',
+  shutter: 'Shutter', power: 'Power', input: 'Input', send: 'Send OSC' };
+const kindOf = id => String(id).startsWith('group:') ? 'projector' : PROJ_TYPES.includes(S.devices[id]?.type) ? 'projector' : S.devices[id]?.type;
+const targets = () => [
+  ...Object.values(S.devices).map(d => ({ id: d.id, label: d.name })),
+  ...S.groups.map(g => ({ id: `group:${g.id}`, label: `Projectors: ${g.name}` })),
+].filter(t => CATALOG[kindOf(t.id)]);
+
+function defaultsFor(device, c) {
+  return Object.fromEntries((CATALOG[kindOf(device)]?.[c] || []).map(([k, , d]) => [k, d]));
+}
+function newAction() {
+  const t = targets()[0]; if (!t) return null;
+  const c = Object.keys(CATALOG[kindOf(t.id)])[0];
+  return { device: t.id, cmd: c, args: defaultsFor(t.id, c) };
+}
+function field(a, [key, type, def, label], onChange) {
+  const val = a.args?.[key] ?? def;
+  const set = v => { a.args = { ...(a.args || {}), [key]: v }; onChange(); };
+  let input;
+  if (type.startsWith('select:')) input = h('select', { onchange: e => set(e.target.value) }, type.slice(7).split('|').map(o => h('option', { value: o, selected: o === val }, o.toUpperCase())));
+  else if (type.startsWith('bool:')) { const [yes, no] = type.slice(5).split('|'); input = h('select', { onchange: e => set(e.target.value === '1') }, h('option', { value: '1', selected: !!val }, yes), h('option', { value: '0', selected: !val }, no)); }
+  else if (type === 'n1') input = h('input', { inputmode: 'numeric', value: Number(val) + 1, onchange: e => set(Math.max(0, Number(e.target.value) - 1)) });
+  else if (type === 'input') {
+    const d = S.devices[a.device], opts = d?.state?.inputs || [];
+    input = opts.length ? h('select', { onchange: e => set(e.target.value) }, h('option', { value: '' }, 'Choose…'), opts.map(i => h('option', { value: i.code, selected: i.code === val }, i.label)))
+      : h('input', { value: val, placeholder: 'e.g. HD1 or 31', onchange: e => set(e.target.value.trim()) });
+  }
+  else input = h('input', { inputmode: type === 'number' ? 'decimal' : 'text', value: val, onchange: e => set(type === 'number' ? Number(e.target.value) : e.target.value) });
+  return h('label', {}, label, input);
+}
+function actionEditor(a, list, i, redraw) {
+  const kind = kindOf(a.device), cmds = CATALOG[kind] || {};
+  return h('div', { class: 'act' },
+    h('label', {}, 'Device', h('select', { onchange: e => { a.device = e.target.value; const c = Object.keys(CATALOG[kindOf(a.device)])[0]; a.cmd = c; a.args = defaultsFor(a.device, c); redraw(); } },
+      targets().map(t => h('option', { value: t.id, selected: t.id === a.device }, t.label)))),
+    h('label', {}, 'Do', h('select', { onchange: e => { a.cmd = e.target.value; a.args = defaultsFor(a.device, a.cmd); redraw(); } },
+      Object.keys(cmds).map(c => h('option', { value: c, selected: c === a.cmd }, CMD_LABEL[c] || c)))),
+    h('div', { class: 'args' }, (cmds[a.cmd] || []).map(f => field(a, f, () => {})),
+      h('label', {}, 'Delay (s)', h('input', { inputmode: 'decimal', value: a.delay || 0, onchange: e => (a.delay = Math.max(0, Number(e.target.value) || 0)) }))),
+    h('div', { class: 'tools' },
+      h('button', { onclick: () => cmd(a.device, a.cmd, a.args || {}) }, '▶ Try it now'),
+      i > 0 && h('button', { onclick: () => { [list[i - 1], list[i]] = [list[i], list[i - 1]]; redraw(); } }, '↑'),
+      h('button', { class: 'danger', onclick: () => { list.splice(i, 1); redraw(); } }, 'Remove')));
+}
+
+function editTab() {
+  const ed = S.editor ||= { draft: JSON.parse(JSON.stringify(S.show.cues)), open: null, dirty: false };
+  const wrap = h('div', {});
+  const redraw = () => { ed.dirty = true; draw(); };
+  const leave = () => { S.editor = null; S.tab = 'show'; render(); };
+  const save = async () => {
+    const r = await new Promise(res => { const id = ++cmdSeq; pending[id] = res; send({ t: 'save-cues', id, cues: ed.draft }); });
+    if (r === true) { toast('Cue list saved'); leave(); } else toast(`Not saved: ${r || 'no answer from Show Control'}`, 6000);
+  };
+  const saveBar = () => h('div', { class: 'sticky-save' },
+    h('button', { onclick: () => (!ed.dirty || confirm('Discard your changes to the cue list?')) && leave() }, 'Cancel'),
+    h('button', { class: 'primary', onclick: save }, 'Save cue list'));
+  function draw() {
+    if (ed.open != null) {
+      const c = ed.draft[ed.open];
+      c.actions ||= [];
+      wrap.replaceChildren(h('div', { class: 'card form' },
+        h('h3', {}, `Cue ${c.number ?? ed.open + 1}`, h('button', { onclick: () => { ed.open = null; draw(); } }, '← All cues')),
+        h('div', { class: 'row' },
+          h('label', { style: 'flex:0 0 110px' }, 'Number', h('input', { inputmode: 'decimal', value: c.number ?? '', onchange: e => { c.number = e.target.value === '' ? '' : isNaN(e.target.value) ? e.target.value : Number(e.target.value); ed.dirty = true; } })),
+          h('label', { style: 'flex:1' }, 'Name', h('input', { value: c.label, onchange: e => { c.label = e.target.value; ed.dirty = true; } }))),
+        h('label', {}, 'Note for the operator (optional)', h('input', { value: c.note || '', placeholder: 'e.g. On SM call', onchange: e => { c.note = e.target.value; ed.dirty = true; } })),
+        h('div', { class: 'sub' }, 'What this cue does'),
+        c.actions.map((a, i) => actionEditor(a, c.actions, i, redraw)),
+        h('button', { onclick: () => { const a = newAction(); if (a) { c.actions.push(a); redraw(); } } }, '+ Add an action')), saveBar());
+      return;
+    }
+    const sh = S.show;
+    wrap.replaceChildren(h('div', { class: 'card' },
+      h('h3', {}, 'Edit cues', h('button', { onclick: () => { ed.draft.push({ number: ed.draft.length + 1, label: 'New cue', actions: [] }); ed.open = ed.draft.length - 1; redraw(); } }, '+ New cue')),
+      ed.draft.length ? ed.draft.map((c, i) => h('div', { class: 'ed-cue' },
+        h('div', { class: 'n' }, c.number ?? i + 1),
+        h('div', {}, h('div', {}, c.label), h('div', { class: 'acts' }, (c.actions || []).map(actionText).join(' · ') || 'No actions yet')),
+        h('div', { class: 'row' },
+          h('button', { onclick: () => { ed.open = i; draw(); } }, 'Edit'),
+          i > 0 && h('button', { onclick: () => { [ed.draft[i - 1], ed.draft[i]] = [ed.draft[i], ed.draft[i - 1]]; redraw(); } }, '↑'),
+          i < ed.draft.length - 1 && h('button', { onclick: () => { [ed.draft[i + 1], ed.draft[i]] = [ed.draft[i], ed.draft[i + 1]]; redraw(); } }, '↓'),
+          h('button', { onclick: () => { ed.draft.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(c)), number: '', label: `${c.label} (copy)` }); redraw(); } }, 'Copy'),
+          h('button', { class: 'danger', onclick: () => confirm(`Delete cue "${c.label}"?`) && (ed.draft.splice(i, 1), redraw()) }, 'Delete'))))
+        : h('p', { class: 'dim' }, 'No cues yet. Tap "+ New cue".'),
+      h('div', { class: 'note' }, `Saving keeps your place in the show (standby: cue ${sh.index + 1}). A backup of the previous cue list is kept next to the show file.`)), saveBar());
+  }
+  draw();
+  return wrap;
 }
 
 // ---------- Cameras ----------

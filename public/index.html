@@ -18,9 +18,12 @@
   <div class="brand"><span id="showName">Show Control</span><span id="conn" class="pill off">offline</span></div>
   <div id="statusDots"></div>
   <div class="clock"><span id="clock">--:--:--</span></div>
+  <button id="estop" class="estop always" title="Hold for 1.5 seconds: QLab panic, close all projector shutters, stop cameras"><span class="fill"></span><span class="lbl">STOP</span></button>
   <button id="lockBtn" class="lock" title="Lock controls">🔓</button>
 </header>
+<div id="emergencyBar" hidden></div>
 <main id="main"></main>
+<div id="offline" hidden><div><b>Not connected to Show Control</b><span>Reconnecting… Buttons do nothing until this goes away.</span></div></div>
 <nav id="tabs">
   <button data-tab="show" class="on">Show</button>
   <button data-tab="lx">Lighting</button>

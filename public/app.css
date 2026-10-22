@@ -106,6 +106,8 @@ nav#tabs button.on { color: var(--text); box-shadow: inset 0 3px 0 var(--blue); 
 
 @media (max-width: 640px) {
   #statusDots .dot span { display: none; }
+  .clock { display: none; }
+  .estop { min-width: 64px; padding: 6px; }
   .showtop { grid-template-columns: 1fr 110px; }
   .standby .lbl { font-size: 19px; } .standby .acts { display: none; }
   #goBtn { min-height: 84px; font-size: 34px; }
@@ -136,3 +138,33 @@ input { font: inherit; font-size: 18px; color: var(--text); background: #000; bo
 .note { font-size: 12px; color: var(--dim); margin-top: 8px; }
 .results { margin-top: 6px; font-size: 13px; } .results .good { color: #7ee2a2; } .results .bad { color: #f8d48a; }
 #toast { white-space: pre-line; max-width: min(560px, 92vw); }
+
+/* Emergency stop (hold to fire) */
+.estop { position: relative; overflow: hidden; background: #3a1416; border: 2px solid var(--red); color: #fff; font-weight: 900; letter-spacing: .08em; min-width: 76px; touch-action: none; }
+.estop .fill { position: absolute; inset: 0; background: var(--red); transform: scaleX(0); transform-origin: left; }
+.estop.holding .fill { transform: scaleX(1); transition: transform 1.5s linear; }
+.estop .lbl { position: relative; }
+#emergencyBar { background: #5b0f14; color: #fff; padding: 10px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 2px solid var(--red); }
+#emergencyBar b { font-size: 16px; } #emergencyBar .r { font-size: 13px; opacity: .9; flex: 1; min-width: 200px; }
+#emergencyBar button { min-height: 36px; }
+/* Lost connection: impossible to miss */
+#offline { position: fixed; inset: 0; z-index: 20; background: #000c; display: grid; place-items: center; text-align: center; }
+#offline div { background: #3a1416; border: 2px solid var(--red); border-radius: 16px; padding: 24px 28px; display: grid; gap: 6px; max-width: 90vw; }
+#offline b { font-size: 22px; } #offline span { color: #ffb4b6; }
+.warnline { color: #f8d48a; font-size: 13px; margin-top: 4px; }
+
+/* Cue editor */
+.ed-cue { display: grid; grid-template-columns: 48px 1fr auto; gap: 8px; align-items: center; padding: 8px; border-radius: 10px; background: var(--panel2); margin-bottom: 4px; }
+.ed-cue .acts { font-size: 12px; color: var(--dim); }
+.ed-cue .row button { min-height: 36px; padding: 4px 10px; font-size: 13px; }
+.form { display: grid; gap: 10px; }
+.form label { display: grid; gap: 4px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+.form input, .form select { width: 100%; }
+select { font: inherit; font-size: 16px; color: var(--text); background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-height: 44px; }
+.act { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #101318; }
+.act .args { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.act .tools { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+.act .tools button { min-height: 36px; font-size: 13px; padding: 4px 10px; }
+.sticky-save { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; display: flex; gap: 8px; }
+.sticky-save button { flex: 1; }
+button.primary { background: var(--go-d); border-color: var(--go); font-weight: 700; }
