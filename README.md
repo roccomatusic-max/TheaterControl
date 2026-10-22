@@ -38,7 +38,7 @@ pocketed phone can't fire anything, and an optional PIN.
 It starts in **practice mode** with simulated equipment. To use real gear, put your show file at
 `Show Control/show.json` in your home folder (start from `config/show.example.json`).
 
-To build the downloads yourself: `npm run package` (or push a `v*` tag and GitHub Actions publishes a release).
+To build the downloads yourself: `npm run package`. When `main` gets a new `version` in `package.json`, GitHub Actions publishes a release with both downloads.
 
 ## Try it now (no hardware, for developers)
 
