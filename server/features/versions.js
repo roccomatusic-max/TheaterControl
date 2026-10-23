@@ -1,8 +1,10 @@
 // Cue list history: every saved cue list is kept as a version (newest 200), so any earlier one can be
 // looked at and put back, and "Undo" puts back the one before the last save. Undoing twice redoes.
-// Versions live in "<Show Control folder>/Cue list history".
+// Versions live in "<Show Control folder>/Cue list history", each marked with its show's name (with
+// several shows, System > Shows, each one only sees and undoes its own).
 const fs = require('fs');
 const path = require('path');
+const { safe } = require('../library');
 
 const KEEP = 200;
 const stamp = t => new Date(t).toISOString().replace(/[:.]/g, '-');
@@ -20,11 +22,16 @@ function compare(before = [], after = []) {
 
 module.exports = function versions(ctx) {
   const dir = path.join(ctx.DATA_DIR, 'Cue list history');
-  const list = () => { try { return fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort(); } catch { return []; } };
+  // This show's versions (older ones, from before there were several shows, belong to every show).
+  const tagOf = () => safe(ctx.show.name).replace(/~/g, '-');
+  const list = () => {
+    const tag = tagOf();
+    try { return fs.readdirSync(dir).filter(f => f.endsWith('.json') && [undefined, tag].includes(f.slice(0, -5).split('~')[1])).sort(); } catch { return []; }
+  };
   const read = f => JSON.parse(fs.readFileSync(path.join(dir, path.basename(f)), 'utf8'));
   function add(cues, who, note, at = Date.now()) {
     fs.mkdirSync(dir, { recursive: true });
-    const file = `${stamp(at)}.json`;
+    const file = `${stamp(at)}~${tagOf()}.json`;
     ctx.writeJson(path.join(dir, file), { at, by: who, mode: ctx.MODE, show: ctx.show.name, note: note || '', cues });
     for (const old of list().slice(0, -KEEP)) fs.rmSync(path.join(dir, old), { force: true });
     return file;

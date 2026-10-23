@@ -283,6 +283,25 @@ a backup computer on standby ignores them.
 Not yet tried on a real console: reading the cue list and patch over OSC, `Time` on a channel level,
 and the console's "cues changed" notices. The simulator answers the way the Eos documentation says.
 
+## Several shows and training mode
+
+- **Shows** (System tab): keep more than one show on the computer, each with its own equipment, cue
+  list, mic plot and cue list history, for another production or another venue. *Start a new show*
+  keeps the same equipment with an empty cue list (or copies everything); *Switch to this* restarts
+  Show Control with the other show (about 10 seconds; every screen reconnects), and each show comes
+  back at the cue where it was left. *Download* gives a show file to take to another computer, and
+  *Add from a file* brings one in. This computer's own settings (PINs, phone alerts, backups, the
+  backup computer) stay as they are when switching, and are never in a downloaded file. Shows live
+  in `Show Control/Shows`.
+- **Training mode** (System tab): new operators practise on a copy of the real show with pretend
+  equipment. Each piece of equipment talks to a simulator of the same kind, or to a stand-in that
+  says yes to everything, so nothing real moves and nothing reaches the real show. The trainer can
+  make any piece of equipment stop answering, or refuse its next command, to practise the alerts.
+  The top of every screen is striped purple while training. *End training* goes back to the real
+  show, at the cue where it was. Training's own cue list history and reports are in
+  `Show Control/Training`. The real show isn't running while training, so don't start it during a
+  performance; the backup computer doesn't copy it or take over meanwhile.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:

@@ -51,9 +51,11 @@ function cmd(device, c, args) {
 }
 let offlineTimer;
 function setConn(ok) {
-  // practice = pretend equipment (tap to set up the real gear), live = real equipment
-  const c = $('#conn'); c.textContent = ok ? (S.mode === 'practice' ? 'practice' : 'live') : 'offline';
-  c.className = 'pill ' + (ok ? (S.mode === 'practice' ? 'warn' : 'ok') : 'off');
+  // practice = pretend equipment (tap to set up the real gear), training = a copy of the real show with
+  // pretend equipment, live = real equipment
+  const c = $('#conn'); c.textContent = ok ? (S.mode === 'practice' || S.mode === 'training' ? S.mode : 'live') : 'offline';
+  c.className = 'pill ' + (ok ? ({ practice: 'warn', training: 'train' }[S.mode] || 'ok') : 'off');
+  document.body.classList.toggle('training', S.mode === 'training');
   clearTimeout(offlineTimer);
   if (ok) $('#offline').hidden = true;
   else offlineTimer = setTimeout(() => ($('#offline').hidden = false), 1200); // brief blips don't flash the warning

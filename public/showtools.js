@@ -219,7 +219,7 @@ SYS_CARDS.push(() => {
         h('select', { onchange: e => set({ paper: e.target.value }) }, h('option', { value: 'letter', selected: st.paper !== 'a4' }, 'Letter'), h('option', { value: 'a4', selected: st.paper === 'a4' }, 'A4')), h('span', { class: 'dim' }, 'paper')),
       r.list.length ? h('div', { class: 'reports' }, r.list.slice(0, 12).map(x => h('button', { class: 'rep always', onclick: () => reportSheet(x.name) },
         h('b', {}, `${new Date(x.first).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${hhmm(x.first)}`),
-        h('span', {}, `${x.kind}${x.mode === 'practice' ? ' (practice)' : ''} · ${x.cuesRun} of ${x.total} cues`),
+        h('span', {}, `${x.kind}${x.mode === 'practice' || x.mode === 'training' ? ` (${x.mode})` : ''} · ${x.cuesRun} of ${x.total} cues`),
         h('span', { class: x.problems ? 'bad' : 'good' }, x.problems ? `${x.problems} problem${x.problems > 1 ? 's' : ''}` : 'no problems'))))
         : h('p', { class: 'dim' }, 'No reports yet.'));
   };

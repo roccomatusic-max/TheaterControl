@@ -10,6 +10,7 @@ const BLOCKED = {
   'backups-restore-cues': 'restore a cue list from a backup', 'setup-save': 'change the equipment setup', autostart: 'change start-up settings',
   'save-mics': 'change the mic plot', 'access-set': 'change PINs', jump: 'jump to another cue',
   'house-set': 'change the house lights setup', 'eos-import': 'edit the cue list', 'chancheck-start': 'start a channel check',
+  'shows-switch': 'switch to another show', 'shows-new': 'start a new show', 'training-start': 'start training mode',
 };
 
 module.exports = function lock(ctx) {

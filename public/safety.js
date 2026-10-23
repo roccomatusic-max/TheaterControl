@@ -118,7 +118,7 @@ function historyTab() {
     const r = await ask('versions-list');
     if (r.error) return list.replaceChildren(h('div', { class: 'bad' }, r.error));
     list.replaceChildren(...r.versions.length ? r.versions.map(v => h('div', { class: `version ${v.current ? 'current' : ''}` },
-      h('div', {}, h('b', {}, when(v.at)), h('span', { class: 'dim' }, ` · ${v.by}${v.mode === 'practice' ? ' · practice' : ''}`),
+      h('div', {}, h('b', {}, when(v.at)), h('span', { class: 'dim' }, ` · ${v.by}${v.mode === 'practice' || v.mode === 'training' ? ` · ${v.mode}` : ''}`),
         h('div', {}, v.note ? `${v.note}: ` : '', v.changes), h('div', { class: 'dim' }, `${v.count} cues`)),
       v.current ? h('span', { class: 'pill ok' }, 'now') : h('button', { onclick: async () => {
         if (!confirm(`Put back the cue list from ${when(v.at)}? The current one stays in the history.`)) return;

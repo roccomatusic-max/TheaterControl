@@ -31,7 +31,7 @@ async function copyDir(from, to, budget) {
 const dirSize = d => { let n = 0; try { for (const e of fs.readdirSync(d, { withFileTypes: true })) n += e.isDirectory() ? dirSize(path.join(d, e.name)) : fs.statSync(path.join(d, e.name)).size; } catch { /* gone */ } return n; };
 
 module.exports = function backups(ctx) {
-  const root = path.join(ctx.DATA_DIR, 'Backups');
+  const root = path.join(ctx.HOME_DIR || ctx.DATA_DIR, 'Backups'); // the real show's folder, also while training
   const cfg = () => ({ time: '03:00', keep: 30, folders: [], ...(ctx.settings().backups || {}) });
   const lastFile = path.join(root, 'last.json');
   let last = null;
@@ -45,7 +45,8 @@ module.exports = function backups(ctx) {
       const dest = path.join(root, folderName(at));
       const problems = [];
       fs.mkdirSync(dest, { recursive: true });
-      const files = [...new Set([ctx.LIVE_PATH, ctx.SAVE_PATH, process.env.SHOW_PRACTICE_PATH, ctx.STATE_PATH].filter(Boolean))];
+      // While training, only the real show (the training copy is thrown away anyway).
+      const files = ctx.MODE === 'training' ? [ctx.REAL_PATH] : [...new Set([ctx.LIVE_PATH, ctx.SAVE_PATH, process.env.SHOW_PRACTICE_PATH, ctx.STATE_PATH].filter(Boolean))];
       for (const f of files) if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dest, path.basename(f)));
       const equipment = Object.fromEntries([...ctx.devices.values()].map(d => [d.id, d.snapshot()]));
       ctx.writeJson(path.join(dest, 'equipment.json'), { at: at.getTime(), show: ctx.show.name, devices: equipment });

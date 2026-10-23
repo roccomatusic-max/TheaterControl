@@ -1,26 +1,19 @@
 // Double-click launcher used by the Mac and Windows downloads (see scripts/package.js).
 // Practice mode (simulated devices) unless the user has a real show file at
-// ~/Show Control/show.json (made by the Setup screen; "live": false keeps practice mode).
+// ~/Show Control/show.json (made by the Setup screen; "live": false keeps practice mode); see plan.js.
 // Opens the browser and prints the iPad address + QR code. Runs the server as a child
 // process and restarts it after a switch between practice and live, or if it ever crashes.
 // --background (used when starting with the computer): no browser, no screen clearing.
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const http = require('http');
 const net = require('net');
 const { execFile, fork, spawn } = require('child_process');
 const QRCode = require('qrcode');
+const { plan, env } = require('./plan');
 
-const ROOT = path.join(__dirname, '..');
-const USER_DIR = path.join(os.homedir(), 'Show Control');
-const USER_CFG = path.join(USER_DIR, 'show.json');
-// Cue edits made in practice mode are kept here, so updating the app never loses them.
-const PRACTICE_CFG = path.join(USER_DIR, 'practice-show.json');
-const SIM_CFG = path.join(ROOT, 'config/show.sim.json');
 const BACKGROUND = process.argv.includes('--background');
 const RESTART = 75;
-const isLive = () => { try { return JSON.parse(fs.readFileSync(USER_CFG, 'utf8')).live !== false; } catch { return false; } };
 
 function openBrowser(url) {
   const [cmd, args] = process.platform === 'darwin' ? ['open', [url]]
@@ -46,8 +39,7 @@ function portFree(port) {
 }
 
 (async () => {
-  const firstCfg = isLive() ? USER_CFG : fs.existsSync(PRACTICE_CFG) ? PRACTICE_CFG : SIM_CFG;
-  const wanted = Number(process.env.PORT || JSON.parse(fs.readFileSync(firstCfg, 'utf8')).server?.port || 8080);
+  const wanted = Number(process.env.PORT || JSON.parse(fs.readFileSync(plan().cfgPath, 'utf8')).server?.port || 8080);
 
   if (await alreadyRunning(wanted)) {
     console.log('\n  Show Control is already running. Opening it in your browser.\n');
@@ -62,21 +54,19 @@ function portFree(port) {
   let child = null, stopping = false, started = 0, crashes = 0, opened = BACKGROUND, recovered = false;
   const run = () => {
     if (stopping) return;
-    const practice = !isLive();
-    if (practice && fs.existsSync(USER_CFG)) try { JSON.parse(fs.readFileSync(USER_CFG, 'utf8')); } catch (e) {
-      console.log(`\n  Your show file has a mistake in it, so Show Control is starting in practice mode.\n  ${USER_CFG}: ${e.message}\n  Saving on the Setup screen replaces it (the old one is kept as show.json.bak).\n`);
+    const pl = plan();
+    if (pl.broken) {
+      console.log(`\n  Your show file has a mistake in it, so Show Control is starting in practice mode.\n  ${pl.p.real}\n  Saving on the Setup screen replaces it (the old one is kept as show.json.bak).\n`);
     }
-    const cfgPath = !practice ? USER_CFG : fs.existsSync(PRACTICE_CFG) ? PRACTICE_CFG : SIM_CFG;
     started = Date.now();
-    child = fork(path.join(__dirname, 'run.js'), [cfgPath], {
+    child = fork(path.join(__dirname, 'run.js'), [pl.cfgPath], {
       env: {
         ...process.env, PORT: String(port), SHOW_QUIET: '1', // device activity is in the System tab; keep this window readable
-        SHOW_MODE: practice ? 'practice' : 'live', SHOW_SAVE_PATH: practice ? PRACTICE_CFG : USER_CFG, SHOW_LIVE_PATH: USER_CFG,
-        SHOW_PRACTICE_PATH: PRACTICE_CFG, SHOW_SIM_CONFIG: SIM_CFG, SHOW_SUPERVISED: '1', SHOW_SIMS: practice ? '1' : '',
+        ...env(pl), SHOW_SUPERVISED: '1',
         SHOW_RECOVERED: recovered ? '1' : '', // started again after a crash: raise an alert
       },
     });
-    child.on('message', m => { if (m?.t === 'ready') banner(m.urls, practice); });
+    child.on('message', m => { if (m?.t === 'ready') banner(m.urls, m.mode || pl.mode); });
     child.on('exit', (code, signal) => {
       child = null;
       if (stopping) return;
@@ -91,16 +81,18 @@ function portFree(port) {
       setTimeout(run, wait * 1000);
     });
   };
-  const banner = async (urls, practice) => {
+  const banner = async (urls, mode) => {
     if (!BACKGROUND) console.clear();
     const ipad = urls[0];
     const line = '─'.repeat(64);
-    console.log(`\n${line}\n  SHOW CONTROL IS RUNNING${practice ? '   (practice mode: pretend equipment)' : '   (live: real equipment)'}\n${line}`);
+    const what = { practice: 'practice mode: pretend equipment', training: 'TRAINING: pretend equipment', live: 'live: real equipment' }[mode];
+    console.log(`\n${line}\n  SHOW CONTROL IS RUNNING   (${what})\n${line}`);
     console.log(`  On this computer:  http://localhost:${port}`);
     console.log(`  On your iPad:      ${ipad || '(connect this computer to Wi-Fi first)'}`);
     if (ipad) console.log('\n  Scan this with the iPad camera:\n\n' + (await QRCode.toString(ipad, { type: 'terminal', small: true })));
     console.log(`  Leave this window open while you use it. Close the window to stop Show Control.`);
-    if (practice) console.log('  To use your real equipment: System tab > Set up real equipment.');
+    if (mode === 'practice') console.log('  To use your real equipment: System tab > Set up real equipment.');
+    if (mode === 'training') console.log('  To go back to the real show: System tab > Training > End training.');
     console.log(`${line}\n`);
     if (!opened) { opened = true; openBrowser(`http://localhost:${port}/connect`); }
   };

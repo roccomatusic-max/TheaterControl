@@ -26,10 +26,10 @@ module.exports = function failover(ctx) {
   const me = { id: crypto.randomBytes(4).toString('hex'), role: conf().role || null, active: true, since: Date.now(), reason: '' };
   let mirrors = new Set(); // sockets of the standby computer copying from us
   let link = null;         // our connection to the active computer, while on standby
-  let lastCopy = 0, takeoverTimer = null, peerSeen = false;
+  let lastCopy = 0, takeoverTimer = null, peerSeen = false, resting = false;
 
   ctx.failover = me;
-  if (!me.role || ctx.MODE === 'practice') { me.role = null; registerHandlers(); return; }
+  if (!me.role || ctx.MODE === 'practice' || ctx.MODE === 'training') { me.role = null; registerHandlers(); return; }
 
   // ---------- standby: copy the active computer ----------
   ctx.holdDevices = true; // index.js starts the equipment once we know we're the active one
@@ -51,6 +51,9 @@ module.exports = function failover(ctx) {
         // Both on standby (e.g. the main computer restarted while the backup was restarting): the main
         // computer takes over; the backup keeps trying until the main one is running the show.
         if (m.failover && !m.failover.active) { ws.close(); if (me.role === 'main') takeOver('both computers were on standby'); return; }
+        // The main computer is in practice or training mode (pretend equipment): don't copy its
+        // pretend show, and don't take over while it is running. Look again in a while.
+        if (!m.failover) { resting = true; me.reason = `the main computer is in ${m.mode === 'training' ? 'training' : 'practice'} mode`; ws.close(); return; }
         applyShow(m.show); if (m.lock !== undefined) ctx.events.emit('mirror-lock', m.lock);
         ws.send(JSON.stringify({ t: 'mirror-hello', id: me.id }));
       }
@@ -63,6 +66,7 @@ module.exports = function failover(ctx) {
     ws.on('close', () => {
       if (link === ws) link = null;
       if (me.active) return;
+      if (resting) { resting = false; setTimeout(connect, 10000); return; }
       // Not answering: take over after TAKEOVER_MS (STARTUP_GRACE_MS if we never reached it).
       if (!takeoverTimer) takeoverTimer = setTimeout(() => takeOver(peerSeen ? 'the main computer stopped answering' : 'the main computer could not be reached after start-up'), peerSeen ? TAKEOVER_MS : STARTUP_GRACE_MS);
       setTimeout(connect, 1000);
@@ -167,7 +171,7 @@ module.exports = function failover(ctx) {
   }
 
   // Screens on the standby computer can look but not run anything.
-  const LOOK = new Set(['auth', 'failover-get', 'failover-set', 'failover-takeover', 'health-get', 'preshow-check', 'versions-list', 'backups-get', 'access-get', 'setup-get', 'screens-list', 'screen-hello', 'depts-get', 'reports-get', 'report-link', 'report-timing', 'remote-get', 'house-get', 'eos-cues-get', 'chancheck-get']);
+  const LOOK = new Set(['auth', 'failover-get', 'failover-set', 'failover-takeover', 'health-get', 'preshow-check', 'versions-list', 'backups-get', 'access-get', 'setup-get', 'screens-list', 'screen-hello', 'depts-get', 'reports-get', 'report-link', 'report-timing', 'remote-get', 'house-get', 'eos-cues-get', 'chancheck-get', 'shows-get', 'training-get']);
   ctx.guards.push(m => {
     if (me.role && !me.active && !LOOK.has(m.t)) throw new Error(`This is the backup computer, on standby. The show is running on ${peerUrl()}.`);
   });

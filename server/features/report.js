@@ -155,7 +155,7 @@ module.exports = function report(ctx) {
     try {
       const res = await fetch(`${(a.ntfyServer || 'https://ntfy.sh').replace(/\/$/, '')}/${a.ntfyTopic}`, {
         method: 'PUT', body: buf, signal: AbortSignal.timeout(30000),
-        headers: { Filename: `${r.name.replace(/[^A-Za-z0-9 ._-]/g, '')}.pdf`, Title: hdr(`${r.show}: ${s.kind}${r.mode === 'practice' ? ' (practice)' : ''}`), Message: hdr(msg), Tags: 'clipboard' },
+        headers: { Filename: `${r.name.replace(/[^A-Za-z0-9 ._-]/g, '')}.pdf`, Title: hdr(`${r.show}: ${s.kind}${r.mode === 'practice' || r.mode === 'training' ? ` (${r.mode})` : ''}`), Message: hdr(msg), Tags: 'clipboard' },
       });
       if (!res.ok) throw new Error(`the alert service answered ${res.status}`);
       return { ok: true, detail: 'Sent. It should arrive on your phone in a few seconds.' };
@@ -182,7 +182,7 @@ module.exports = function report(ctx) {
     doc.rect(0, 0, doc.width, 6, '#1fbf5a');
     doc.text(M, y, r.show, { size: 20, bold: true }); y += 26;
     const day = new Date(s.first).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    doc.text(M, y, `${s.kind} · ${day}${r.mode === 'practice' ? ' · practice (simulated equipment)' : ''}`, { size: 12, color: '#444' });
+    doc.text(M, y, `${s.kind} · ${day}${r.mode === 'practice' || r.mode === 'training' ? ` · ${r.mode} (simulated equipment)` : ''}`, { size: 12, color: '#444' });
     const made = `Made ${clock(r.finishedAt)}`;
     doc.text(M + W - doc.textWidth(made, 9), y + 2, made, { size: 9, color: '#777' });
     y += 22;

@@ -101,7 +101,7 @@ module.exports = function health(ctx) {
     const p = phoneCfg();
     if (!p.ntfyTopic || (!p.on && !force)) return { ok: false, detail: 'Phone alerts are off.' };
     const body = {
-      topic: p.ntfyTopic, title: `${show.name}${ctx.MODE === 'practice' ? ' (practice)' : ''}`, message: a.msg,
+      topic: p.ntfyTopic, title: `${show.name}${ctx.MODE === 'practice' || ctx.MODE === 'training' ? ` (${ctx.MODE})` : ''}`, message: a.msg,
       priority: a.level === 'error' ? 5 : 3, tags: [a.level === 'error' ? 'rotating_light' : a.level === 'warn' ? 'warning' : 'white_check_mark'],
     };
     try {
