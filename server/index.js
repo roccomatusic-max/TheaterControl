@@ -2,6 +2,7 @@
 // Usage: node server/index.js [path/to/show.json]   (default config/show.json)
 const fs = require('fs');
 const path = require('path');
+const { EventEmitter } = require('events');
 const http = require('http');
 const os = require('os');
 const express = require('express');
@@ -67,12 +68,20 @@ micPlan.on('changed', () => queueDevice(micPlan));
 micPlan.on('alert', raiseAlert);
 devices.set(micPlan.id, micPlan);
 
-// ---------- alerts (possible feedback, low mic batteries) ----------
-// Shown on every iPad and phone until someone dismisses them. Same key = same alert, not a new one.
+// ---------- alerts (possible feedback, low mic batteries, equipment that stopped answering, STOP) ----------
+// Shown on every iPad and phone until someone dismisses them (or, for equipment, until it answers
+// again). Same key = same alert, not a new one. features/health.js raises the equipment ones and
+// sends every alert to the phone.
 let alerts = [];
 function raiseAlert(a) {
   alerts = [{ ...a, at: Date.now() }, ...alerts.filter(x => x.key !== a.key)].slice(0, 20);
-  log({ device: a.kind === 'feedback' ? a.device : 'mics', level: 'warn', msg: `${a.title}${a.detail ? ` (${a.detail})` : ''}`, t: Date.now() });
+  log({ device: a.device || 'mics', level: a.level === 'error' ? 'error' : 'warn', msg: `${a.title}${a.detail ? ` (${a.detail})` : ''}`, t: Date.now() });
+  broadcast({ t: 'alerts', alerts });
+  events.emit('alert', alerts[0]);
+}
+function clearAlert(key) {
+  if (!alerts.some(a => a.key === key)) return;
+  alerts = alerts.filter(a => a.key !== key);
   broadcast({ t: 'alerts', alerts });
 }
 
@@ -199,8 +208,9 @@ function validateCues(cues) {
     return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(c.note ? { note: String(c.note) } : {}), ...(tasks.length ? { crew: tasks } : {}), actions };
   });
 }
-function saveCues(cues, who) {
+function saveCues(cues, who, note) {
   const clean = validateCues(cues);
+  const before = show.cues;
   let onDisk = cfg;
   try { onDisk = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf8')); } catch { /* first save of a practice copy */ }
   if (fs.existsSync(SAVE_PATH)) fs.copyFileSync(SAVE_PATH, `${SAVE_PATH}.bak`);
@@ -208,8 +218,9 @@ function saveCues(cues, who) {
   show.cues = clean;
   show.index = Math.min(show.index, clean.length);
   if (show.lastFired != null && show.lastFired >= clean.length) show.lastFired = null;
-  log({ device: 'show', level: 'cmd', msg: `cue list saved (${clean.length} cues) by ${who}`, t: Date.now() });
+  log({ device: 'show', level: 'cmd', msg: `cue list saved (${clean.length} cues) by ${who}${note ? `: ${note}` : ''}`, t: Date.now() });
   saveState();
+  events.emit('cues-saved', { before, cues: clean, who, note });
 }
 
 // Mic plot edits from the iPad: validated, backed up, saved to the show file, used at once.
@@ -242,6 +253,7 @@ async function emergencyStop(who) {
     .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
   show.emergency = { at: Date.now(), by: who, results };
   broadcast({ t: 'show', show: showSnapshot() });
+  events.emit('emergency', who, results);
   return results;
 }
 function fireCue(i, source) {
@@ -321,6 +333,35 @@ function saveSetup(m, who) {
   return { restarting, missing };
 }
 
+// ---------- feature modules (server/features) ----------
+// Each module gets this context. It can answer extra WebSocket requests (handlers[type] = async
+// (msg, ws) => reply data), add to the first message a screen gets (initExtras), and add items to
+// the pre-show check (checks). Server-wide settings (alerts, PINs, backups) live in the real show
+// file, so practice and live share them.
+const SETTINGS_PATH = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
+const events = new EventEmitter();
+const ctx = {
+  cfg, devices, show, log, broadcast, raiseAlert, clearAlert, runAction, fireCue, saveCues, showSnapshot, writeJson, readJson, events,
+  MODE, SAVE_PATH, LIVE_PATH, STATE_PATH, SUPERVISED, handlers: {}, initExtras: [], checks: [],
+  DATA_DIR: process.env.SHOW_DATA_DIR || path.dirname(SETTINGS_PATH), // history and backups go here
+  guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
+  // Replaced by features/access.js (PINs per role); this is the single-PIN behaviour without it.
+  access: { required: () => !!PIN, hint: () => ({}), roleFor: pin => (!PIN || String(pin) === String(PIN) ? 'admin' : null) },
+  clients: () => [...wss.clients].filter(c => c.authed && c.readyState === 1 && !c.mirror),
+  // Equipment connections open once the server is listening, unless a feature holds them (the
+  // backup computer on standby). Each device is started at most once per run.
+  holdDevices: false,
+  startDevices() { if (this.devicesStarted) return; this.devicesStarted = true; for (const d of devices.values()) d.start(); },
+  stopDevices() { if (this.devicesStarted) for (const d of devices.values()) d.stop(); },
+  saveState: () => saveState(),
+  settings: () => readJson(SETTINGS_PATH, null) ?? readJson(SAVE_PATH, cfg),
+  saveSettings(patch) {
+    const cur = readJson(SETTINGS_PATH, null) ?? (MODE === 'practice' ? { live: false } : readJson(SAVE_PATH, cfg));
+    writeJson(SETTINGS_PATH, { ...cur, ...patch });
+  },
+};
+for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens']) require(`./features/${f}`)(ctx);
+
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
 function lanAddresses() {
@@ -361,24 +402,27 @@ function broadcast(msg) {
 }
 
 wss.on('connection', (ws, req) => {
-  const who = req.socket.remoteAddress?.replace('::ffff:', '');
-  ws.authed = !PIN;
-  const hello = () => ws.send(JSON.stringify({
+  const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
+  ws.authed = !ctx.access.required();
+  ws.role = ws.authed ? 'admin' : null;
+  const hello = () => ws.send(JSON.stringify(Object.assign({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
     ui: cfg.ui || {}, groups: groups(), mode: MODE, alerts, crew: crew.snapshot(), script: crew.script(),
     firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
-  }));
-  if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
+  }, ...ctx.initExtras.map(f => f(ws)))));
+  if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required', ...ctx.access.hint() }));
 
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.t === 'auth') {
-      if (String(m.pin) === String(PIN)) { ws.authed = true; hello(); log({ device: 'core', msg: `client ${who} signed in`, t: Date.now() }); }
+      const role = ctx.access.roleFor(m.pin);
+      if (role) { ws.authed = true; ws.role = role; hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
       else ws.send(JSON.stringify({ t: 'auth-failed' }));
       return;
     }
     if (!ws.authed) return;
     try {
+      for (const guard of ctx.guards) guard(m, ws);
       if (m.t === 'cmd') {
         const results = await runAction(m, who);
         if (m.id) ws.send(JSON.stringify({ t: 'result', id: m.id, results }));
@@ -388,11 +432,11 @@ wss.on('connection', (ws, req) => {
         else if (m.action === 'fire') fireCue(Number(m.index), who);
         else if (m.action === 'standby') { show.index = Math.max(0, Math.min(show.cues.length, Number(m.index))); saveState(); }
         else if (m.action === 'timer') timer(m.timer, m.op);
-        else if (m.action === 'clear-emergency') show.emergency = null;
+        else if (m.action === 'clear-emergency') { show.emergency = null; events.emit('emergency-cleared', who); }
         broadcast({ t: 'show', show: showSnapshot() });
       }
       else if (m.t === 'emergency') await emergencyStop(who);
-      else if (m.t === 'alert-dismiss') { alerts = alerts.filter(a => a.key !== m.key); broadcast({ t: 'alerts', alerts }); }
+      else if (m.t === 'alert-dismiss') clearAlert(m.key);
       else if (m.t === 'save-mics') {
         saveMics(m.mics, who);
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));
@@ -415,6 +459,7 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));
         broadcast({ t: 'show', show: showSnapshot() });
       }
+      else if (ctx.handlers[m.t]) ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await ctx.handlers[m.t](m, ws) }));
     } catch (e) {
       ws.send(JSON.stringify({ t: 'error', id: m.id, msg: e.message }));
       log({ device: m.device || 'core', level: 'error', msg: e.message, t: Date.now() });
@@ -425,14 +470,15 @@ wss.on('connection', (ws, req) => {
 server.listen(PORT, cfg.server?.host || '0.0.0.0', () => {
   const urls = lanAddresses().map(a => a.url);
   console.log(`Show Control "${show.name}" using ${cfgPath}`);
-  console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${PIN ? '  (PIN required)' : ''}`);
-  for (const d of devices.values()) d.start();
+  console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${ctx.access.required() ? '  (PIN required)' : ''}`);
+  if (!ctx.holdDevices) ctx.startDevices();
+  events.emit('listening');
   server.emit('ready', { port: PORT, urls });
 });
 
 module.exports = { server, lanAddresses };
 
-function shutdown() { for (const d of devices.values()) d.stop(); process.exit(0); }
+function shutdown() { ctx.stopDevices(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 // A bug in one driver must not take the whole show down: log it and keep running.
 process.on('uncaughtException', e => log({ device: 'core', level: 'error', msg: `internal error (kept running): ${e.stack || e.message}`, t: Date.now() }));

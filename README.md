@@ -157,6 +157,64 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 
 <p><img src="docs/screenshots/ipad-mics.png" width="70%" alt="Mics tab on iPad: mic scene, packs with meters and batteries, feedback alert"></p>
 
+## Health, alerts and the pre-show check
+
+- **Pre-show check** (System > Pre-show check): one button tests every piece of equipment, the cue list
+  (standby at the top, timers at zero, cues that use equipment with no address) and this computer
+  (disk space). Each line is green, amber or red, with a one-tap fix where there is an obvious one.
+- **Ready dots**: every cue in the list has a dot that is green when all the equipment it uses is answering.
+- **Alerts**: one alert bar on every screen (with a beep, where the browser allows sound) for equipment
+  that was working and stopped answering for 5 seconds, the emergency stop, possible feedback and low
+  mic batteries (see Sound and mics). Equipment alerts clear when it answers again; several at once
+  become one line. Tap the status dots at the top to see how long each device has been up and how
+  often it dropped out.
+- **Phone alerts**: turn them on in the Health screen and subscribe to the private channel name in the free
+  [ntfy](https://ntfy.sh) app. Equipment drop-outs, the emergency stop, possible feedback, low mic batteries and an
+  unexpected restart of Show Control reach the phone even when the app is closed. Alerts that happen together are sent as
+  one message. The show computer needs internet for this (the control network). Settings are in the
+  show file: `"alerts": { "on": true, "ntfyTopic": "…", "ntfyServer": "https://ntfy.sh" }`.
+
+## Locks, PINs, undo and backups
+
+- **Lock button** (top right) offers two locks:
+  - **Lock the show**: every screen at once, and it survives a restart. GO, STOP, standby and the
+    everyday controls keep working. Editing or restoring cues, equipment setup, firing a cue out of
+    order, resetting timers and switching equipment off are refused until someone unlocks with the
+    operator or admin PIN.
+  - **Lock this screen**: only STOP works on that screen. Good for a phone in a pocket.
+- **Who can do what** (System tab): an admin PIN (everything; the same PIN as on the Setup screen),
+  an operator PIN (runs the show, edits cues) and a crew PIN (watch only). Optionally, crew can watch
+  without a PIN. With no PINs, there is no sign-in. The PINs apply in practice and live.
+- **Cue list history**: every saved cue list is kept (the newest 200) in `Show Control/Cue list history`.
+  *Undo* puts back the one before the last save, and undoing again redoes. Any earlier version can
+  be put back, with a summary of what changed.
+- **Backups**: every night (03:00 by default, and on start-up if the last one is over a day old) into
+  `Show Control/Backups/<date>`. Each backup has the show files, what each device reported (mixer
+  channel names and levels, Eos show name, projector lamp hours) and any folders added on the System
+  tab, for example the QLab workspace when QLab runs on the show computer. The newest 30 are kept.
+  A cue list can be put back from any backup. The pre-show check warns when the last backup is
+  missing, old or had a problem.
+
+## Backup computer and spare screens
+
+- **Backup computer** (System > Backup computer): a second computer running Show Control, plugged
+  into both networks like the main one, with the same admin PIN. On the main computer choose "Main
+  computer" and type the backup's address; on the backup choose "Backup computer" and type the main
+  computer's address. Both settings are in each computer's own show file:
+  `"failover": { "role": "main", "peer": "<other computer>:8080" }`.
+  - The backup stays on standby. It copies the show as it runs (cue list, cue position, timers, the
+    show lock, settings) and never talks to the equipment.
+  - If the main computer stops answering for 5 seconds, the backup takes over with the show where it
+    was, connects to the equipment and sends an alert. The iPads and phones move across by themselves.
+  - When the main computer comes back, it waits on standby. Tap *Hand back to the main computer* on the
+    backup when it suits you (for example in the interval); the backup then restarts on standby.
+  - *Take over now* on the standby computer forces a switch. Only use it if the other one has really stopped.
+  - Not copied yet: crew screen state (calls, checklist ticks).
+- **Spare screens**: every iPad, phone and computer has a name (System > Screens, *Rename*). If one
+  breaks or goes flat, open Show Control on a spare: it offers to carry on from the screen that dropped
+  off, with the same name, tab, camera and projector group. *Carry on here* on the Screens card does
+  the same at any time.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:
@@ -202,6 +260,7 @@ For recording or streaming the show, OBS on the server can take the same feeds.
 
 ```
 server/index.js          HTTP + WebSocket hub, show cue stack, timers, PIN, log
+server/features/*.js     self-contained features (health, …) that plug into index.js through ctx
 server/drivers/*.js      one driver per device type; each exposes status, state, command()
 server/catalog.js        the "Add equipment" list: makes/models → driver, defaults, set-up steps
 server/discover.js       "Find equipment on the network"
@@ -216,6 +275,10 @@ Adding a device type means adding one file in `server/drivers/` and one line in 
 (or dropping a plugin file in `plugins/`). Adding another brand of something already supported is
 one line in `server/catalog.js`.
 
+Adding a feature means one file in `server/features/` (it gets `ctx`: devices, show, log, broadcast,
+settings, and `handlers` for extra WebSocket requests), plus a script in `public/` that uses the
+extension points at the top of `public/app.js` (`VIEWS`, `SYS_CARDS`, `onMsg`, `ask`).
+
 ## Next ideas
 
 - Projection mapping (shared with Projector Control's mapping module)
@@ -223,4 +286,3 @@ one line in `server/catalog.js`.
 - MIDI timecode out
 - LTC/MTC display and chase, Clear-Com/Green-GO comms status
 - Backstage and front-of-house paging through QLab
-- Per-user roles (SM: GO only; TD: everything)
