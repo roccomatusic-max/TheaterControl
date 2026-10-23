@@ -5,5 +5,6 @@ module.exports = {
   ptz: require('./ptz'),
   pjlink: require('./pjlink'),
   panasonic: require('./panasonic'),
+  shure: require('./shure'),
   osc: require('./osc-generic'),
 };
