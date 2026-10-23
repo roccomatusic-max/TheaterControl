@@ -73,6 +73,8 @@ async function testOneWay(dc) {
   return { ok: near !== false, oneWay: true, detail: `Can't check this one from here.${off} ${how}` };
 }
 
+const plain = e => PLAIN[Object.keys(PLAIN).find(k => String(e?.code || e?.message || e).includes(k))] || 'No answer from that address.';
+
 // Starts a throwaway copy of the real driver and waits for it to hear from the device.
 function testDevice(dc, ms = 6000) {
   const D = drivers[dc.type];
@@ -125,7 +127,7 @@ function describe(dc, d) {
     case 'eos': return `Connected to Eos${s.showName ? `, show "${s.showName}"` : ''}.`;
     case 'yamaha-tf': return 'Connected to the mixer.';
     case 'qlab': return `QLab answered${s.playheadName ? `, playhead on "${s.playheadName}"` : ''}.`;
-    case 'ptz': return 'The camera answered.';
+    case 'ptz': case 'camera': return 'The camera answered.';
     case 'shure': { const linked = (s.channels || []).filter(c => c.tx).length; return `The receiver answered${linked ? `: ${linked} pack${linked > 1 ? 's' : ''} switched on` : ''}.`; }
     case 'panasonic': case 'pjlink': return `The projector answered${s.power ? `: ${s.power}` : ''}${s.info?.name ? ` (${s.info.name})` : ''}.`;
     case 'x32': return `Connected to the mixer${s.model ? ` (${s.model})` : ''}.`;
@@ -151,10 +153,13 @@ function cleanDevices(list) {
     const host = String(d.host || '').trim();
     if (host && !isIPv4(host) && !/^[A-Za-z0-9.-]+$/.test(host)) throw new Error(`${name}: "${host}" is not an address`);
     if (d.profile != null && !catalog.profileById(d.profile)) delete d.profile; // a brand entry that no longer exists: keep the driver
+    const video = String(d.video || '').trim();
+    if (video && !/^(rtsps?|https?):\/\/\S+$/.test(video)) throw new Error(`${name}: the video address should start with rtsp://`);
     const out = { ...d, id, name, host };
+    if (video) out.video = video; else delete out.video;
     if (!host && !drivers[d.type].meta?.addressOptional) out.enabled = false; else delete out.enabled;
     return out;
   });
 }
 
-module.exports = { realTemplate, testDevice, cleanDevices, localNetworks, sameNetwork, ping };
+module.exports = { realTemplate, testDevice, cleanDevices, localNetworks, sameNetwork, ping, plain };

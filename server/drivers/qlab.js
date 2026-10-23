@@ -8,6 +8,7 @@ class QLabDriver extends Driver {
   constructor(cfg) {
     super(cfg);
     this.state = { playhead: '', playheadName: '', running: [] };
+    this.waiting = new Map(); // reply address → [resolve]
   }
 
   start() {
@@ -39,11 +40,49 @@ class QLabDriver extends Driver {
     for (const { address, args } of msgs) {
       if (!address.startsWith('/reply')) continue;
       let body; try { body = JSON.parse(args[0]); } catch { continue; }
+      const want = this.waiting.get(address.slice(6));
+      if (want) { this.waiting.delete(address.slice(6)); want.forEach(f => f(body)); continue; }
       if (body.status && body.status !== 'ok') { this.log(`${body.address}: ${body.status}`, 'warn'); continue; }
       if (address.endsWith('/cue/playhead/number')) this.patch({ playhead: body.data ?? '' });
       else if (address.endsWith('/cue/playhead/displayName')) this.patch({ playheadName: body.data ?? '' });
       else if (address.endsWith('/runningCues/shallow')) this.patch({ running: (body.data || []).map(c => c.listName || c.name || c.number) });
     }
+  }
+
+  // Ask QLab something and wait for its /reply. Resolves the reply's data; rejects on no answer.
+  query(address, args = [], ms = 2500) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => { this.waiting.delete(address); reject(new Error('QLab did not answer')); }, ms);
+      const list = this.waiting.get(address) || [];
+      list.push(body => { clearTimeout(t); body.status && body.status !== 'ok' ? reject(new Error(`QLab said "${body.status}"`)) : resolve(body.data); });
+      this.waiting.set(address, list);
+      this.send(address, args);
+    });
+  }
+
+  // Content check: every cue QLab reports as broken, e.g. a video or audio file that has gone
+  // missing. Uses /cueLists, then valuesForKeys on each cue (QLab 4 and 5).
+  async contentCheck() {
+    const lists = await this.query('/cueLists', [], 5000);
+    const cues = [];
+    const walk = cs => { for (const c of cs || []) { if (c.cues) walk(c.cues); if (!/^(Cue List|Cart|Group)$/.test(c.type)) cues.push(c); } };
+    for (const l of lists || []) walk(l.cues);
+    const MEDIA = /^(Audio|Video)$/;
+    const broken = [];
+    let checked = 0;
+    for (let i = 0; i < cues.length; i += 20) {
+      await Promise.all(cues.slice(i, i + 20).map(async c => {
+        const addr = `/cue_id/${c.uniqueID}/valuesForKeys`;
+        let v;
+        try { v = await this.query(addr, ['["isBroken","fileTarget"]']); }
+        catch { v = await this.query(addr, ['["isBroken","fileTarget"]']).catch(() => null); } // UDP: one retry
+        if (!v) return;
+        checked++;
+        if (v.isBroken) broken.push({ number: c.number, name: c.name || c.listName, type: c.type, fileTarget: MEDIA.test(c.type) ? v.fileTarget || null : null });
+      }));
+    }
+    if (checked < cues.length) throw new Error(`QLab only answered for ${checked} of ${cues.length} cues; try again`);
+    return { total: cues.length, media: cues.filter(c => MEDIA.test(c.type)).length, broken };
   }
 
   async command(cmd, a = {}) {

@@ -1,3 +1,5 @@
+# Not needed any more: Show Control starts go2rtc by itself and writes its settings from the
+# camera list (each camera's "video" address). Kept for running go2rtc by hand.
 # go2rtc (single binary, no internet needed): https://github.com/AlexxIT/go2rtc
 # Pulls each camera's RTSP feed once and re-serves it to iPads/phones as WebRTC (sub-second latency).
 # Run on the show server:  ./go2rtc -config deploy/go2rtc.yaml   → web UI on http://SERVER:1984
