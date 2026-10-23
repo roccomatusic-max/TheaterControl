@@ -12,6 +12,8 @@ function h(tag, attrs = {}, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
   return el;
 }
+// el.replaceChildren(...) that skips false/null and flattens lists, like h() does.
+const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(c => c != null && c !== false));
 
 const S = { devices: {}, show: null, log: [], ui: {}, tab: localStorage.getItem('tab') || 'show', clockSkew: 0 };
 const updaters = {}; // device id → [fn(snapshot)]
@@ -194,7 +196,7 @@ function showTab() {
   const update = sh => {
     const next = sh.cues[sh.index];
     go.disabled = !next;
-    stby.replaceChildren(h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
+    fill(stby, h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
       next?.note && h('div', { class: 'cue-note' }, next.note),
       h('div', { class: 'acts' }, next ? (next.actions || []).map(actionText).join(' · ') : ''),
       warn);

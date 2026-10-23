@@ -143,7 +143,7 @@ SYS_CARDS.push(() => {
     if (r.error) return body.replaceChildren(h('div', { class: 'bad' }, r.error));
     const l = r.last;
     const admin = S.role === 'admin';
-    body.replaceChildren(
+    fill(body,
       h('div', { class: 'kv' },
         h('b', {}, 'Last backup'), h('span', { class: !l ? 'bad' : l.ok ? 'good' : 'bad' }, r.running ? 'Backing up now…' : !l ? 'none yet' : `${when(l.at)}${l.ok ? '' : `: ${l.problems.join('; ')}`}`),
         h('b', {}, 'Every night at'), admin ? h('input', { class: 'time', type: 'time', value: r.time, onchange: async e => draw(await ask('backups-set', { time: e.target.value })) }) : h('span', {}, r.time),
