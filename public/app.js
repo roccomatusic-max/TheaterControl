@@ -51,7 +51,7 @@ function handle(m) {
   else if (m.t === 'auth-failed') { $('#pinErr').textContent = 'Wrong PIN'; localStorage.removeItem('pin'); $('#pin').hidden = false; }
   else if (m.t === 'init') {
     $('#pin').hidden = true;
-    S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || [];
+    S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || []; S.crew = m.crew;
     S.mode = m.mode; setConn(true);
     S.alerts = m.alerts || []; renderAlerts();
     if (S.setup?.restarting) S.setup = null; // back after a practice/live switch: reload the equipment list
@@ -67,6 +67,7 @@ function handle(m) {
   } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); renderEmergency(); (updaters.__show || []).forEach(fn => fn(S.show)); }
   else if (m.t === 'meters') { (S.meters ||= {})[m.device] = m.levels; (updaters.__meters || []).forEach(fn => fn(m.device)); }
   else if (m.t === 'alerts') { S.alerts = m.alerts; renderAlerts(); }
+  else if (m.t === 'crew') S.crew = m.crew;
   else if (m.t === 'saved') { pending[m.id]?.(true); delete pending[m.id]; }
   else if (m.t === 'reply') { pending[m.id]?.(m.data); delete pending[m.id]; }
   else if (m.t === 'log') { S.log.push(m.entry); if (S.log.length > 300) S.log.shift(); (updaters.__log || []).forEach(fn => fn(m.entry)); }
@@ -90,6 +91,10 @@ const lockBtn = $('#lockBtn');
 function setLock(on) { document.body.classList.toggle('locked', on); lockBtn.textContent = on ? '🔒' : '🔓'; localStorage.setItem('locked', on ? '1' : ''); }
 lockBtn.addEventListener('click', () => setLock(!document.body.classList.contains('locked')));
 setLock(!!localStorage.getItem('locked'));
+// Night mode: dim red screen for backstage (same switch as the crew screens, kept per device).
+function setNight(on) { document.documentElement.classList.toggle('night', on); localStorage.setItem('night', on ? '1' : ''); }
+$('#nightBtn').addEventListener('click', () => setNight(!document.documentElement.classList.contains('night')));
+setNight(!!localStorage.getItem('night'));
 
 // Emergency stop: hold 1.5 s. Works even when the screen is locked.
 (() => {
@@ -169,7 +174,8 @@ function showTab() {
     const next = sh.cues[sh.index];
     go.disabled = !next;
     stby.replaceChildren(h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
-      h('div', { class: 'acts' }, next ? [next.note ? `${next.note} · ` : '', (next.actions || []).map(actionText).join(' · ')] : ''),
+      next?.note && h('div', { class: 'cue-note' }, next.note),
+      h('div', { class: 'acts' }, next ? (next.actions || []).map(actionText).join(' · ') : ''),
       warn);
     warn.replaceChildren(warnLine(next));
     list.replaceChildren(...sh.cues.map((c, i) => h('div', { class: `cue ${i < sh.index ? 'done' : ''} ${i === sh.index ? 'next' : ''} ${i === sh.lastFired ? 'last' : ''}` },
@@ -194,7 +200,8 @@ function showTab() {
         h('button', { onclick: () => cmd(qlab.id, 'stop') }, 'Stop'), h('button', { class: 'danger', onclick: () => cmd(qlab.id, 'panic') }, 'Panic'))));
   return h('div', {},
     h('div', { class: 'showtop' }, stby, go),
-    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, h('button', { onclick: () => { S.tab = 'edit'; render(); } }, '✎ Edit cues')),
+    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, h('button', { class: 'always', onclick: () => (location.href = '/sm.html') }, 'Stage manager view'),
+      h('button', { onclick: () => { S.tab = 'edit'; render(); } }, '✎ Edit cues')),
     h('div', { class: 'timers', style: 'margin-bottom:10px' }, tmr('show', 'Show'), tmr('act', S.show.timers.label)),
     quick,
     h('div', { class: 'card', style: 'margin-top:10px' }, h('h3', {}, 'Show cues'), list));
@@ -470,6 +477,14 @@ function actionEditor(a, list, i, redraw) {
       h('button', { class: 'danger', onclick: () => { list.splice(i, 1); redraw(); } }, 'Remove')));
 }
 
+function crewTaskEditor(x, list, i, redraw) {
+  const roles = [...new Set([...(S.crew?.roles || []), x.role].filter(Boolean))];
+  return h('div', { class: 'act' },
+    h('label', {}, 'Who', h('select', { onchange: e => { x.role = e.target.value; redraw(); } }, roles.map(r => h('option', { value: r, selected: r === x.role }, r)))),
+    h('label', {}, 'Task', h('input', { value: x.task || '', placeholder: 'e.g. Fly in the moon', onchange: e => { x.task = e.target.value; redraw(); } })),
+    h('div', { class: 'tools' }, h('button', { class: 'danger', onclick: () => { list.splice(i, 1); redraw(); } }, 'Remove')));
+}
+
 function editTab() {
   const ed = S.editor ||= { draft: JSON.parse(JSON.stringify(S.show.cues)), open: null, dirty: false };
   const wrap = h('div', {});
@@ -494,7 +509,10 @@ function editTab() {
         h('label', {}, 'Note for the operator (optional)', h('input', { value: c.note || '', placeholder: 'e.g. On SM call', onchange: e => { c.note = e.target.value; ed.dirty = true; } })),
         h('div', { class: 'sub' }, 'What this cue does'),
         c.actions.map((a, i) => actionEditor(a, c.actions, i, redraw)),
-        h('button', { onclick: () => { const a = newAction(); if (a) { c.actions.push(a); redraw(); } } }, '+ Add an action')), saveBar());
+        h('button', { onclick: () => { const a = newAction(); if (a) { c.actions.push(a); redraw(); } } }, '+ Add an action'),
+        h('div', { class: 'sub' }, 'Crew tasks (shown on that person\'s phone, which lights up at standby and GO)'),
+        (c.crew ||= []).map((x, i) => crewTaskEditor(x, c.crew, i, redraw)),
+        h('button', { onclick: () => { c.crew.push({ role: S.crew?.roles?.[0] || '', task: '' }); redraw(); } }, '+ Add a crew task')), saveBar());
       return;
     }
     const sh = S.show;
@@ -624,7 +642,15 @@ function sysTab() {
   (updaters.__log ||= []).push(e => { const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20; log.append(line(e)); if (atBottom) log.scrollTop = log.scrollHeight; });
   setTimeout(() => (log.scrollTop = log.scrollHeight));
   const devs = h('div', { class: 'kv' }, Object.values(S.devices).filter(d => d.type !== 'mics').map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
-  return h('div', { class: 'grid' }, setupCard(), h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
+  const screen = (href, name, what) => h('div', {}, h('a', { href, target: '_blank', style: 'color:#9cc4ff;font-weight:600' }, name), h('div', { class: 'dim', style: 'font-size:13px' }, what));
+  const screens = h('div', { class: 'card' }, h('h3', {}, 'Stage manager and crew screens'),
+    h('div', { style: 'display:grid;gap:10px' },
+      screen('/sm.html', 'Stage manager', 'Big GO, standby with crew ready, calls, notes, script, checklist, countdown'),
+      screen('/crew.html', 'Crew phones', 'Each person picks their job: own run sheet, cue light, calls'),
+      screen('/foh.html', 'Front of house', 'House open / closed / hold for the stage manager, calls, lobby message'),
+      screen('/lobby.html', 'Lobby TV', 'Big countdown to the start or end of the interval')),
+    h('p', { class: 'hint' }, `On another phone or iPad, open ${location.origin} followed by the page name, e.g. ${location.origin}/crew.html`));
+  return h('div', { class: 'grid' }, setupCard(), screens, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Log'), log));
 }
 

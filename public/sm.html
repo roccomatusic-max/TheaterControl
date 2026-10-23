@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0d10">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="crew/crew.css">
+<title>Stage manager</title>
+</head>
+<body>
+<header>
+  <div class="brand"><span>Stage manager</span><span id="conn" class="pill off">offline</span></div>
+  <div id="fohStatus" style="flex:1;min-width:0"></div>
+  <div class="clock"><span id="clock">--:--</span></div>
+  <span id="night"></span>
+  <a href="/" class="always" style="color:var(--dim);font-size:13px">Full controls</a>
+</header>
+<main class="page"><div class="sm" id="sm"></div></main>
+<script src="crew/common.js"></script>
+<script src="crew/sm.js"></script>
+</body>
+</html>

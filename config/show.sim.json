@@ -66,6 +66,12 @@
       {
         "number": 3,
         "label": "Overture",
+        "crew": [
+          {
+            "role": "Fly floor",
+            "task": "Fly out the show cloth"
+          }
+        ],
         "actions": [
           {
             "device": "eos",
@@ -124,6 +130,16 @@
       {
         "number": 4,
         "label": "Opening number",
+        "crew": [
+          {
+            "role": "Follow spot 1",
+            "task": "Pick up Lead at centre"
+          },
+          {
+            "role": "ASM stage left",
+            "task": "Stand by the chair for scene 2"
+          }
+        ],
         "actions": [
           {
             "device": "eos",
@@ -156,6 +172,12 @@
       {
         "number": 5,
         "label": "Thunder + blackout",
+        "crew": [
+          {
+            "role": "ASM stage left",
+            "task": "Thunder sheet"
+          }
+        ],
         "actions": [
           {
             "device": "eos",
@@ -179,11 +201,22 @@
               "closed": true
             }
           }
-        ]
+        ],
+        "note": "Wait for the door slam"
       },
       {
         "number": 6,
         "label": "Ballad",
+        "crew": [
+          {
+            "role": "Follow spot 1",
+            "task": "Lead, tight head shot"
+          },
+          {
+            "role": "Follow spot 2",
+            "task": "Pick up the duet partner at stage right"
+          }
+        ],
         "actions": [
           {
             "device": "eos",
@@ -227,6 +260,16 @@
       {
         "number": 7,
         "label": "Act 1 finale",
+        "crew": [
+          {
+            "role": "Fly floor",
+            "task": "Fly in the house tabs"
+          },
+          {
+            "role": "Wardrobe",
+            "task": "Quick change for the Lead at stage left"
+          }
+        ],
         "actions": [
           {
             "device": "eos",
