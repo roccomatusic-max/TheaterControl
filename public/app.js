@@ -12,16 +12,29 @@ function h(tag, attrs = {}, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
   return el;
 }
+// el.replaceChildren(...) that skips false/null and flattens lists, like h() does.
+const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(c => c != null && c !== false));
 
 const S = { devices: {}, show: null, log: [], ui: {}, tab: localStorage.getItem('tab') || 'show', clockSkew: 0 };
 const updaters = {}; // device id → [fn(snapshot)]
+// Extension points for the other files (setup.js, health.js, …): extra screens, extra cards on the
+// System tab, and handlers for extra server messages.
+const VIEWS = {};       // tab name → () => element
+const NAV_PARENT = { edit: 'show', setup: 'sys', wizard: 'sys' }; // sub-screens light up their parent tab
+const SYS_CARDS = [];   // () => element, shown on the System tab
+const SHOW_BUTTONS = []; // () => element, buttons next to "Edit cues" on the Show tab
+const STANDBY_EXTRAS = []; // (show) => element or null, extra lines in the standby box
+const LX_CARDS = [];     // (eos device or undefined) => element or null, cards on the Lighting tab
+const msgHandlers = {}; // message type → [fn(msg)], called before the built-in handling
+const onMsg = (t, fn) => (msgHandlers[t] ||= []).push(fn);
 const onDevice = (id, fn) => { (updaters[id] ||= []).push(fn); if (S.devices[id]) fn(S.devices[id]); };
 const byType = t => Object.values(S.devices).filter(d => d.type === t);
 
 // ---------- connection ----------
 let ws, wsTimer;
+let wsHost = () => location.host; // failover.js moves to the backup computer when this one stops
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${wsHost()}/ws`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500); };
   ws.onmessage = e => handle(JSON.parse(e.data));
@@ -38,15 +51,18 @@ function cmd(device, c, args) {
 }
 let offlineTimer;
 function setConn(ok) {
-  // practice = pretend equipment (tap to set up the real gear), live = real equipment
-  const c = $('#conn'); c.textContent = ok ? (S.mode === 'practice' ? 'practice' : 'live') : 'offline';
-  c.className = 'pill ' + (ok ? (S.mode === 'practice' ? 'warn' : 'ok') : 'off');
+  // practice = pretend equipment (tap to set up the real gear), training = a copy of the real show with
+  // pretend equipment, live = real equipment
+  const c = $('#conn'); c.textContent = ok ? (S.mode === 'practice' || S.mode === 'training' ? S.mode : 'live') : 'offline';
+  c.className = 'pill ' + (ok ? ({ practice: 'warn', training: 'train' }[S.mode] || 'ok') : 'off');
+  document.body.classList.toggle('training', S.mode === 'training');
   clearTimeout(offlineTimer);
   if (ok) $('#offline').hidden = true;
   else offlineTimer = setTimeout(() => ($('#offline').hidden = false), 1200); // brief blips don't flash the warning
 }
 
 function handle(m) {
+  (msgHandlers[m.t] || []).forEach(fn => fn(m)); // first, so other files' state is ready when the screen is drawn
   if (m.t === 'auth-required') { $('#pin').hidden = false; $('#pinInput').focus(); const saved = localStorage.getItem('pin'); if (saved) send({ t: 'auth', pin: saved }); }
   else if (m.t === 'auth-failed') { $('#pinErr').textContent = 'Wrong PIN'; localStorage.removeItem('pin'); $('#pin').hidden = false; }
   else if (m.t === 'init') {
@@ -81,6 +97,15 @@ function handle(m) {
     if (bad.length) toast(bad.map(r => `${r.name.split(' · ')[0]}: ${r.outcome.replace('_', ' ')}${r.detail ? ` (${r.detail})` : ''}`).join('\n'), 6000);
   }
 }
+// Request/reply to the server: resolves with the reply data, or { error } in plain words.
+function ask(t, payload = {}, ms = 20000) {
+  const id = ++cmdSeq;
+  send({ t, id, ...payload });
+  return new Promise(res => {
+    pending[id] = r => res(typeof r === 'string' ? { error: r } : r === true ? {} : r);
+    setTimeout(() => { if (pending[id]) { delete pending[id]; res({ error: 'No answer from Show Control' }); } }, ms);
+  });
+}
 $('#pin form').addEventListener('submit', e => { e.preventDefault(); const pin = $('#pinInput').value; localStorage.setItem('pin', pin); send({ t: 'auth', pin }); });
 
 function toast(msg, ms = 2500) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), ms); }
@@ -92,7 +117,6 @@ function renderDots() {
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; localStorage.setItem('tab', S.tab); render(); }));
 const lockBtn = $('#lockBtn');
 function setLock(on) { document.body.classList.toggle('locked', on); lockBtn.textContent = on ? '🔒' : '🔓'; localStorage.setItem('locked', on ? '1' : ''); }
-lockBtn.addEventListener('click', () => setLock(!document.body.classList.contains('locked')));
 setLock(!!localStorage.getItem('locked'));
 // Night mode: dim red screen for backstage (same switch as the crew screens, kept per device).
 function setNight(on) { document.documentElement.classList.toggle('night', on); localStorage.setItem('night', on ? '1' : ''); }
@@ -132,10 +156,11 @@ setInterval(() => { $('#clock').textContent = new Date(Date.now() + S.clockSkew)
 
 function render() {
   for (const k of Object.keys(updaters)) delete updaters[k];
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ({ edit: 'show', setup: 'sys', wizard: 'sys' }[S.tab] || S.tab)));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (NAV_PARENT[S.tab] || S.tab)));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, mics: micsTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab]());
+  const view = VIEWS[S.tab] || ({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, mics: micsTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab] || showTab;
+  main.replaceChildren(view());
 }
 
 // ---------- Show tab ----------
@@ -154,8 +179,17 @@ function cueDevices(cue) {
     ? (S.groups.find(g => g.id === a.device.slice(6))?.members || []) : [a.device]))];
 }
 function warnLine(cue) {
+  if (S.failover && !S.failover.active) return ''; // a standby computer never connects to the equipment
   const off = cueDevices(cue).map(id => S.devices[id]).filter(d => d && d.status !== 'online');
   return off.length ? h('div', { class: 'warnline' }, `⚠ Not connected: ${off.map(d => d.name.split(' · ')[0]).join(', ')}`) : '';
+}
+// Ready dot: green when every piece of equipment the cue uses is answering, red when one isn't.
+function setReadyDot(el, cue) {
+  const ids = cueDevices(cue), off = ids.filter(id => S.devices[id]?.status !== 'online');
+  el.className = `rdot ${!ids.length ? 'none' : off.length ? 'bad' : 'good'}`;
+  el.title = !ids.length ? 'This cue does not control any equipment'
+    : off.length ? `Not ready: ${off.map(id => S.devices[id]?.name.split(' · ')[0] || `${id} (no address)`).join(', ')}` : 'Everything this cue uses is answering';
+  return el;
 }
 
 function showTab() {
@@ -176,13 +210,13 @@ function showTab() {
   const update = sh => {
     const next = sh.cues[sh.index];
     go.disabled = !next;
-    stby.replaceChildren(h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
+    fill(stby, h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
       next?.note && h('div', { class: 'cue-note' }, next.note),
       h('div', { class: 'acts' }, next ? (next.actions || []).map(actionText).join(' · ') : ''),
-      warn);
+      STANDBY_EXTRAS.map(f => f(sh)), warn);
     warn.replaceChildren(warnLine(next));
     list.replaceChildren(...sh.cues.map((c, i) => h('div', { class: `cue ${i < sh.index ? 'done' : ''} ${i === sh.index ? 'next' : ''} ${i === sh.lastFired ? 'last' : ''}` },
-      h('div', { class: 'n' }, c.number ?? i + 1),
+      h('div', { class: 'n' }, c.number ?? i + 1, setReadyDot(h('i'), c)),
       h('div', {}, h('div', {}, c.label), h('div', { class: 'tags' }, (c.actions || []).map(actionText).join(' · '))),
       h('div', { class: 'row' }, h('button', { onclick: () => send({ t: 'show', action: 'standby', index: i }) }, 'Stby'),
         h('button', { onclick: () => confirm(`Fire ${c.label} now?`) && send({ t: 'show', action: 'fire', index: i }) }, 'Fire')))));
@@ -191,7 +225,10 @@ function showTab() {
     if (nx) list.scrollTop = Math.max(0, nx.offsetTop - list.offsetTop - 60);
   };
   (updaters.__show ||= []).push(update);
-  (updaters.__anyDevice ||= []).push(() => warn.replaceChildren(warnLine(S.show.cues[S.show.index])));
+  (updaters.__anyDevice ||= []).push(() => {
+    warn.replaceChildren(warnLine(S.show.cues[S.show.index]));
+    list.querySelectorAll('.rdot').forEach((el, i) => setReadyDot(el, S.show.cues[i]));
+  });
   setTimeout(() => update(S.show));
 
   const eos = byType('eos')[0], qlab = byType('qlab')[0];
@@ -203,7 +240,7 @@ function showTab() {
         h('button', { onclick: () => cmd(qlab.id, 'stop') }, 'Stop'), h('button', { class: 'danger', onclick: () => cmd(qlab.id, 'panic') }, 'Panic'))));
   return h('div', {},
     h('div', { class: 'showtop' }, stby, go),
-    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, h('button', { class: 'always', onclick: () => (location.href = '/sm.html') }, 'Stage manager view'),
+    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, SHOW_BUTTONS.map(f => f()), h('button', { class: 'always', onclick: () => (location.href = '/sm.html') }, 'Stage manager view'),
       h('button', { onclick: () => { S.tab = 'edit'; render(); } }, '✎ Edit cues')),
     h('div', { class: 'timers', style: 'margin-bottom:10px' }, tmr('show', 'Show'), tmr('act', S.show.timers.label)),
     quick,
@@ -218,7 +255,7 @@ function eosStatus(id) {
 }
 function lxTab() {
   const eos = byType('eos')[0];
-  if (!eos) return h('div', { class: 'card' }, 'No Eos console configured.');
+  if (!eos) return h('div', { class: 'grid' }, h('div', { class: 'card' }, 'No Eos console configured.'), LX_CARDS.map(f => f()));
   const cueIn = h('input', { inputmode: 'decimal', placeholder: 'Cue', style: 'width:90px' });
   const chanIn = h('input', { inputmode: 'numeric', placeholder: 'Chan', style: 'width:80px' });
   const lvlIn = h('input', { inputmode: 'numeric', placeholder: '@ %', style: 'width:70px' });
@@ -237,7 +274,8 @@ function lxTab() {
         h('button', { onclick: () => chanIn.value && cmd(eos.id, 'chan', { chan: chanIn.value, level: 'Out' }) }, 'Out')),
       cmdline),
     h('div', { class: 'card' }, h('h3', {}, 'Quick buttons'),
-      h('div', { class: 'row' }, (S.ui.eosQuick || []).map(q => h('button', { onclick: () => cmd(eos.id, q.cmd, q.args) }, q.label)))));
+      h('div', { class: 'row' }, (S.ui.eosQuick || []).map(q => h('button', { onclick: () => cmd(eos.id, q.cmd, q.args) }, q.label)))),
+    LX_CARDS.map(f => f(eos)));
 }
 function statusPill(id) {
   const p = h('span', { class: 'pill' });
@@ -522,6 +560,8 @@ function editTab() {
           h('label', { style: 'flex:0 0 110px' }, 'Number', h('input', { inputmode: 'decimal', value: c.number ?? '', onchange: e => { c.number = e.target.value === '' ? '' : isNaN(e.target.value) ? e.target.value : Number(e.target.value); ed.dirty = true; } })),
           h('label', { style: 'flex:1' }, 'Name', h('input', { value: c.label, onchange: e => { c.label = e.target.value; ed.dirty = true; } }))),
         h('label', {}, 'Note for the operator (optional)', h('input', { value: c.note || '', placeholder: 'e.g. On SM call', onchange: e => { c.note = e.target.value; ed.dirty = true; } })),
+        h('label', {}, 'Fires by itself at timecode (optional, hours:minutes:seconds:frames)', h('input', { value: c.tc || '', placeholder: 'e.g. 00:03:12:05', inputmode: 'numeric', onchange: e => { c.tc = e.target.value.trim(); ed.dirty = true; } })),
+        h('label', {}, 'Starts a new scene (optional, for the scene map)', h('input', { value: c.scene || '', placeholder: 'e.g. Act 1 · Scene 2: The ball', onchange: e => { c.scene = e.target.value; ed.dirty = true; } })),
         h('div', { class: 'sub' }, 'What this cue does'),
         c.actions.map((a, i) => actionEditor(a, c.actions, i, redraw)),
         h('button', { onclick: () => { const a = newAction(); if (a) { c.actions.push(a); redraw(); } } }, '+ Add an action'),
@@ -532,7 +572,8 @@ function editTab() {
     }
     const sh = S.show;
     wrap.replaceChildren(h('div', { class: 'card' },
-      h('h3', {}, 'Edit cues', h('button', { onclick: () => { ed.draft.push({ number: ed.draft.length + 1, label: 'New cue', actions: [] }); ed.open = ed.draft.length - 1; redraw(); } }, '+ New cue')),
+      h('h3', {}, 'Edit cues', h('span', { class: 'row' }, h('button', { onclick: () => { if (!ed.dirty || confirm('Leave without saving your changes?')) { S.editor = null; S.tab = 'history'; render(); } } }, '↶ Undo / history'),
+        h('button', { onclick: () => { ed.draft.push({ number: ed.draft.length + 1, label: 'New cue', actions: [] }); ed.open = ed.draft.length - 1; redraw(); } }, '+ New cue'))),
       ed.draft.length ? ed.draft.map((c, i) => h('div', { class: 'ed-cue' },
         h('div', { class: 'n' }, c.number ?? i + 1),
         h('div', {}, h('div', {}, c.label), h('div', { class: 'acts' }, (c.actions || []).map(actionText).join(' · ') || 'No actions yet')),
@@ -665,7 +706,7 @@ function sysTab() {
       screen('/foh.html', 'Front of house', 'House open / closed / hold for the stage manager, calls, lobby message'),
       screen('/lobby.html', 'Lobby TV', 'Big countdown to the start or end of the interval')),
     h('p', { class: 'hint' }, `On another phone or iPad, open ${location.origin} followed by the page name, e.g. ${location.origin}/crew.html`));
-  return h('div', { class: 'grid' }, setupCard(), screens, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
+  return h('div', { class: 'grid' }, setupCard(), SYS_CARDS.map(f => f()), screens, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Log'), log));
 }
 

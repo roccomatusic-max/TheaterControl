@@ -3,6 +3,6 @@
 if (process.env.SHOW_SIMS) require('../sim/devices');
 setTimeout(() => {
   const { server } = require('../server/index');
-  server.on('ready', ({ urls }) => process.send?.({ t: 'ready', urls }));
+  server.on('ready', ({ urls, mode }) => process.send?.({ t: 'ready', urls, mode }));
   server.on('error', e => { console.error(`\n  Could not start: ${e.message}\n`); process.exit(1); });
 }, process.env.SHOW_SIMS ? 300 : 0);

@@ -1,0 +1,117 @@
+/* Show lock, roles, cue list history, backups (see safety.js) */
+body.showlocked #lockBtn { background: var(--blue); border-color: var(--blue); }
+body.locked #lockBtn { background: var(--amber); border-color: var(--amber); }
+#rolePill { background: #1b2a44; color: #9cc3ff; }
+
+/* Watch-only screens: everything shows, nothing can be pressed except moving around. */
+body.role-viewer main button:not(.always), body.role-viewer .fader, body.role-viewer .joy, body.role-viewer main input, body.role-viewer main select { pointer-events: none; opacity: .45; }
+body.role-viewer #estop, body.role-viewer #goBtn { display: none; }
+body.role-viewer .showtop { grid-template-columns: 1fr; }
+#pin .watch { background: none; color: var(--dim); }
+
+.sheet { position: fixed; inset: 0; background: #000c; display: grid; place-items: center; z-index: 20; padding: 16px; }
+.sheet .box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; width: min(460px, 100%); display: grid; gap: 10px; max-height: 90vh; overflow: auto; }
+.sheet h2 { margin: 0 0 4px; }
+.sheet p { margin: 0; color: #c9ced6; }
+.sheet input { width: 100%; }
+.sheet .err { color: #ffb4b6; min-height: 1em; }
+button.choice { display: grid; gap: 4px; text-align: left; padding: 14px; }
+button.choice b { font-size: 17px; } button.choice span { color: var(--dim); font-size: 13px; font-weight: 400; }
+button.choice.primary span { color: #d7f5e2; }
+
+.form label small { display: block; margin-top: 2px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+label.check { display: flex; align-items: center; gap: 10px; }
+label.check input { width: 22px; height: 22px; min-height: 0; }
+
+.versions { display: grid; gap: 6px; }
+.version { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.version.current { border: 1px solid var(--go); }
+.hcard .good, .card .kv .good { color: #7ee2a2; } .card .kv .bad { color: #ffb4b6; }
+ul.plain { margin: 4px 0 8px; padding-left: 18px; color: #c9ced6; font-size: 14px; }
+ul.plain li { margin-bottom: 4px; }
+button.mini { min-height: 32px; padding: 3px 10px; font-size: 13px; margin-left: 6px; }
+input.time { font-size: 15px; min-height: 36px; padding: 4px 8px; width: 120px; }
+details summary { cursor: pointer; color: var(--dim); margin: 10px 0 6px; }
+.bk { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.picker .here { margin-bottom: 8px; word-break: break-all; }
+.picker .dirs { display: grid; gap: 4px; margin-top: 8px; max-height: 45vh; overflow: auto; }
+.picker .dirs button { text-align: left; }
+
+/* Backup computer banner and the Screens card (see failover.js) */
+#failoverBar { padding: 8px 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-weight: 700; }
+#failoverBar.standby { background: #12233f; color: #9cc3ff; border-bottom: 2px solid var(--blue); }
+#failoverBar.running { background: #4a1d06; color: #ffd9b0; border-bottom: 2px solid var(--amber); }
+#failoverBar a { color: inherit; }
+.screens { display: grid; gap: 6px; }
+.scr { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--panel2); border-left: 5px solid var(--go); font-size: 14px; }
+.scr.off { border-left-color: var(--red); }
+.scr .pill { margin-left: 6px; }
+
+/* Scene map, rehearsal jump, second operator, show reports (see showtools.js) */
+.splitline { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 99px; color: var(--c); border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
+.jumplist { display: grid; gap: 6px; max-height: 55vh; overflow: auto; }
+.jumplist .sub { margin: 8px 0 0; }
+button.choice.here { border-color: var(--stby); }
+.modes { display: grid; gap: 6px; }
+.jumpsteps { display: grid; gap: 4px; font-size: 14px; }
+.jstep { border-left: 4px solid var(--c); padding: 4px 8px; background: var(--panel2); border-radius: 6px; }
+
+.tl-body { position: relative; padding-top: 22px; }
+.tl-scenes { position: absolute; inset: 0 0 0 96px; pointer-events: none; }
+.tl-scene { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); }
+.tl-scene.alt { background: #ffffff06; }
+.tl-scene span { position: absolute; top: 2px; left: 4px; right: 2px; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-lane { position: relative; display: flex; align-items: center; height: 26px; }
+.tl-name { flex: 0 0 96px; font-size: 12px; font-weight: 700; }
+.tl-track { position: relative; flex: 1; height: 100%; border-bottom: 1px dashed var(--line); }
+.tl-track i { position: absolute; top: 7px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; cursor: pointer; }
+.tl-track i.done { opacity: .35; }
+.tl-now { position: absolute; top: 18px; bottom: 0; width: 2px; margin-left: -1px; background: var(--stby); box-shadow: 0 0 6px var(--stby); pointer-events: none; z-index: 1; }
+.map { display: grid; gap: 2px; font-size: 13px; }
+.mrow { display: grid; grid-template-columns: 52px minmax(140px, 1.3fr) repeat(var(--lanes), minmax(0, 1fr)); gap: 8px; padding: 8px; border-radius: 8px; background: var(--panel2); align-items: start; cursor: pointer; }
+.mrow.head { background: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); cursor: default; padding-top: 0; }
+.mrow.done { opacity: .5; }
+.mrow.next { outline: 2px solid var(--stby); }
+.mrow.flash { background: #3a2c0b; }
+.mrow .c small { display: block; color: var(--stby); font-size: 12px; }
+.mrow .cell { white-space: pre-line; border-left: 3px solid var(--c); padding-left: 6px; color: #d6dae0; }
+.mrow .cell.empty { border-left-color: transparent; }
+.mscene { margin-top: 10px; padding: 4px 2px; font-weight: 800; font-size: 14px; color: var(--text); border-bottom: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .mrow.head { display: none; }
+  .mrow { display: block; }
+  .mrow .t { float: right; color: var(--dim); }
+  .mrow .cell { display: block; margin-top: 4px; }
+  .mrow .cell.empty { display: none; }
+  .mrow .cell::before { content: attr(data-lane) ': '; color: var(--c); font-weight: 700; }
+  .tl-name { flex-basis: 70px; font-size: 11px; }
+  .tl-scenes { left: 70px; }
+}
+
+.deptbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 10px; border-radius: var(--r); background: color-mix(in srgb, var(--c) 18%, var(--panel)); border: 1px solid var(--c); }
+.deptbar b { color: var(--c); font-size: 17px; text-transform: uppercase; letter-spacing: .04em; }
+.deptbar button { margin-left: auto; }
+button.deptgo { background: var(--c); border: 0; color: #0b0d10; font-size: 30px; font-weight: 900; border-radius: var(--r); min-height: 120px; box-shadow: 0 4px 0 color-mix(in srgb, var(--c) 60%, #000); }
+button.deptgo:disabled { opacity: .35; box-shadow: none; }
+.deptpos { margin-top: 8px; font-size: 13px; color: var(--dim); }
+.deptpos.bad { color: #ffb4b6; font-weight: 700; }
+.deptpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.deptpick button.choice { border-left: 6px solid var(--c); }
+@media (max-width: 700px) { button.deptgo { min-height: 84px; font-size: 20px; } }
+
+.reports { display: grid; gap: 6px; margin-top: 10px; }
+button.rep { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; text-align: left; font-size: 14px; align-items: center; }
+button.rep span:nth-child(2) { color: var(--dim); }
+a.btnlink { display: block; text-align: center; text-decoration: none; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-weight: 700; }
+a.btnlink.primary { background: var(--go-d); border-color: var(--go); }
+
+/* Buttons, MIDI and timecode (see inputs.js) */
+.tcchip { display: inline-flex; gap: 8px; align-items: center; margin-top: 6px; min-height: 30px; padding: 3px 10px; font-size: 12px; border-radius: 99px; }
+.tcchip span { color: var(--dim); }
+.tcchip.run b { color: #7ee2a2; }
+.tcchip.follow { border-color: var(--go); }
+p.small, .small { font-size: 13px; }
+.urls { display: grid; gap: 4px; word-break: break-all; background: var(--panel2); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+.oscport { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px 36px; font-size: 14px; color: var(--dim); }
+.learning { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: #3a2c0b; color: #f8d48a; font-weight: 700; }
