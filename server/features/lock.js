@@ -11,6 +11,7 @@ const BLOCKED = {
   'save-mics': 'change the mic plot', 'access-set': 'change PINs', jump: 'jump to another cue',
   'house-set': 'change the house lights setup', 'eos-import': 'edit the cue list', 'chancheck-start': 'start a channel check',
   'shows-switch': 'switch to another show', 'shows-new': 'start a new show', 'training-start': 'start training mode',
+  'update-install': 'update Show Control', 'update-back': 'change the Show Control version', 'update-upload': 'update Show Control',
 };
 
 module.exports = function lock(ctx) {

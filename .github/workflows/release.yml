@@ -42,5 +42,6 @@ jobs:
             echo
             echo 'Nothing else to install. It starts in practice mode with simulated equipment, opens your browser, and shows a code to scan with your iPad.'
           } > notes.md
+          # --generate-notes adds the list of merged pull requests, which System > Updates shows as "what's new".
           gh release create "$TAG" dist/ShowControl-mac.zip dist/ShowControl-windows.zip \
-            --target "$GITHUB_SHA" --title "Show Control $TAG" --notes-file notes.md $PRE
+            --target "$GITHUB_SHA" --title "Show Control $TAG" --notes-file notes.md --generate-notes $PRE

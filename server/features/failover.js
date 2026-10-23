@@ -171,7 +171,8 @@ module.exports = function failover(ctx) {
   }
 
   // Screens on the standby computer can look but not run anything.
-  const LOOK = new Set(['auth', 'failover-get', 'failover-set', 'failover-takeover', 'health-get', 'preshow-check', 'versions-list', 'backups-get', 'access-get', 'setup-get', 'screens-list', 'screen-hello', 'depts-get', 'reports-get', 'report-link', 'report-timing', 'remote-get', 'house-get', 'eos-cues-get', 'chancheck-get', 'shows-get', 'training-get']);
+  const LOOK = new Set(['auth', 'failover-get', 'failover-set', 'failover-takeover', 'health-get', 'preshow-check', 'versions-list', 'backups-get', 'access-get', 'setup-get', 'screens-list', 'screen-hello', 'depts-get', 'reports-get', 'report-link', 'report-timing', 'remote-get', 'house-get', 'eos-cues-get', 'chancheck-get', 'shows-get', 'training-get',
+    'update-get', 'update-check', 'update-install', 'update-back', 'update-upload']); // the standby computer can be updated
   ctx.guards.push(m => {
     if (me.role && !me.active && !LOOK.has(m.t)) throw new Error(`This is the backup computer, on standby. The show is running on ${peerUrl()}.`);
   });

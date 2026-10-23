@@ -13,7 +13,7 @@ const NOT_IN_TRAINING = {
   'setup-save': 'change the equipment setup', 'failover-set': 'set up the backup computer', 'failover-takeover': 'take over the show',
   autostart: 'change start-up settings', 'training-start': 'start training again',
   'shows-switch': 'switch shows', 'shows-new': 'start a new show', 'shows-import': 'add a show', 'shows-delete': 'delete a show',
-  'update-install': 'update Show Control',
+  'update-install': 'update Show Control', 'update-back': 'change the Show Control version', 'update-upload': 'update Show Control',
 };
 
 module.exports = function training(ctx) {

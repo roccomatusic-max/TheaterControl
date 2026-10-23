@@ -4,6 +4,7 @@
 // Opens the browser and prints the iPad address + QR code. Runs the server as a child
 // process and restarts it after a switch between practice and live, or if it ever crashes.
 // --background (used when starting with the computer): no browser, no screen clearing.
+// After a one-tap update, this launcher starts the newer version's launcher instead (versions.js).
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -11,9 +12,17 @@ const net = require('net');
 const { execFile, fork, spawn } = require('child_process');
 const QRCode = require('qrcode');
 const { plan, env } = require('./plan');
+const versions = require('./versions');
 
 const BACKGROUND = process.argv.includes('--background');
-const RESTART = 75;
+const RESTART = 75, UPDATE = 76; // exit codes of the server: restart, or run another version
+const ROOT_APP = path.join(__dirname, '..');
+const HANDED = !!process.env.SHOW_ROOT_APP; // started by an older version's launcher, which chooses
+// How long a newly installed version has to get its server running before we go back.
+const CONFIRM_MS = Number(process.env.SHOW_UPDATE_CONFIRM_MS || 120e3);
+let stopNow = () => process.exit(0);
+for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => stopNow());
+let opened = BACKGROUND, awake = false;
 
 function openBrowser(url) {
   const [cmd, args] = process.platform === 'darwin' ? ['open', [url]]
@@ -38,7 +47,40 @@ function portFree(port) {
   });
 }
 
-(async () => {
+// Runs the version chosen on System > Updates if it isn't this one, else this one's own server.
+function start() {
+  const next = !HANDED && versions.pick(ROOT_APP);
+  if (next) handOff(next);
+  else serve().catch(e => { console.error('\n  Show Control could not start:', e.message, '\n'); process.exitCode = 1; });
+}
+
+function handOff(next) {
+  console.log(`\n  Starting Show Control ${next.version}…\n`);
+  const t0 = Date.now();
+  let settled = false;
+  const child = spawn(next.node, [next.start, ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, SHOW_ROOT_APP: ROOT_APP, SHOW_ROOT_NODE: process.execPath } });
+  stopNow = () => { settled = true; child.kill(); setTimeout(() => process.exit(0), 1500); };
+  const back = why => {
+    if (settled) return;
+    settled = true; clearInterval(watch);
+    versions.failed(next, why);
+    console.log(`\n  Show Control ${next.version} didn't start properly (${why}), so the version before it starts instead.\n`);
+    if (child.exitCode !== null || child.signalCode !== null) return start();
+    child.removeAllListeners('exit'); child.once('exit', () => start()); child.kill();
+  };
+  const watch = setInterval(() => {
+    if (versions.confirmed(next)) { settled = true; clearInterval(watch); } else if (Date.now() - t0 > CONFIRM_MS) back(`it wasn't running after ${Math.round(CONFIRM_MS / 1000)} s`);
+  }, 1000);
+  child.on('error', e => back(e.message));
+  child.on('exit', (code, signal) => {
+    clearInterval(watch);
+    if (code === UPDATE) return start(); // another version was chosen: choose again
+    if (!settled && code !== 0 && !signal) return back(`it stopped with code ${code}`);
+    process.exit(code ?? 0);
+  });
+}
+
+async function serve() {
   const wanted = Number(process.env.PORT || JSON.parse(fs.readFileSync(plan().cfgPath, 'utf8')).server?.port || 8080);
 
   if (await alreadyRunning(wanted)) {
@@ -49,9 +91,9 @@ function portFree(port) {
   let port = wanted;
   while (!(await portFree(port)) && port < wanted + 20) port++;
   // The show computer must not go to sleep while Show Control runs (Mac; the display may still sleep).
-  if (process.platform === 'darwin') spawn('caffeinate', ['-is', '-w', String(process.pid)], { stdio: 'ignore' }).on('error', () => {});
+  if (process.platform === 'darwin' && !awake) { awake = true; spawn('caffeinate', ['-is', '-w', String(process.pid)], { stdio: 'ignore' }).on('error', () => {}); }
 
-  let child = null, stopping = false, started = 0, crashes = 0, opened = BACKGROUND, recovered = false;
+  let child = null, stopping = false, started = 0, crashes = 0, recovered = false;
   const run = () => {
     if (stopping) return;
     const pl = plan();
@@ -73,6 +115,8 @@ function portFree(port) {
       // Stopped on purpose (window closed, Ctrl-C, shutdown): stop the launcher too.
       if (code === 0 || ['SIGINT', 'SIGTERM', 'SIGHUP'].includes(signal)) return process.exit(0);
       if (code === RESTART) { recovered = false; console.log('\n  Restarting Show Control with the new settings…\n'); return run(); }
+      // Updated (or back to an earlier version): the started launcher chooses which one runs now.
+      if (code === UPDATE) { console.log('\n  Restarting Show Control in another version…\n'); return HANDED ? process.exit(UPDATE) : start(); }
       // Crashed: start again. Back off if it keeps failing straight away (e.g. the port is taken).
       crashes = Date.now() - started < 20000 ? crashes + 1 : 0;
       recovered = true;
@@ -96,7 +140,8 @@ function portFree(port) {
     console.log(`${line}\n`);
     if (!opened) { opened = true; openBrowser(`http://localhost:${port}/connect`); }
   };
-  const quit = () => { stopping = true; child?.kill(); setTimeout(() => process.exit(0), 300); };
-  process.on('SIGINT', quit); process.on('SIGTERM', quit); process.on('SIGHUP', quit);
+  stopNow = () => { stopping = true; child?.kill(); setTimeout(() => process.exit(0), 300); };
   run();
-})().catch(e => { console.error('\n  Show Control could not start:', e.message, '\n'); process.exitCode = 1; });
+}
+
+start();

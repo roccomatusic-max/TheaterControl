@@ -384,11 +384,12 @@ const ctx = {
   startDevices() { if (this.devicesStarted) return; this.devicesStarted = true; for (const d of devices.values()) d.start(); },
   stopDevices() { if (this.devicesStarted) for (const d of devices.values()) d.stop(); },
   saveState: () => saveState(),
-  // Stop and start again with a different show file or mode. The launcher (or the service the show
-  // computer runs Show Control as) starts it again; run by hand, it has to be started again by hand.
-  restart(msg) {
+  // Stop and start again with a different show file or mode (or, with code 76, in another version of
+  // Show Control: features/updates.js). The launcher (or the service the show computer runs Show
+  // Control as) starts it again; run by hand, it has to be started again by hand.
+  restart(msg, code = RESTART) {
     log({ device: 'core', level: 'cmd', msg: `${msg}, ${SUPERVISED ? 'restarting' : 'stopping: start Show Control again to carry on'}`, t: Date.now() });
-    setTimeout(() => { this.stopDevices(); process.exit(RESTART); }, 500);
+    setTimeout(() => { this.stopDevices(); process.exit(code); }, 500);
   },
   heldBack: () => false, // (action) => true when a second operator runs that department (features/departments.js)
   routes: [],            // (app) => adds HTTP routes (features/report.js serves report files)
@@ -398,7 +399,7 @@ const ctx = {
     writeJson(SETTINGS_PATH, { ...cur, ...patch });
   },
 };
-for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report', 'remote', 'house', 'eoscues', 'chancheck', 'training', 'shows']) require(`./features/${f}`)(ctx);
+for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report', 'remote', 'house', 'eoscues', 'chancheck', 'training', 'shows', 'updates']) require(`./features/${f}`)(ctx);
 
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
@@ -432,7 +433,7 @@ ol{color:#c9ced6;padding-left:20px}a.btn{display:inline-block;margin-top:20px;ba
 </main></body></html>`);
 });
 app.use(express.static(path.join(__dirname, '../public'), { maxAge: 0 }));
-app.get('/api/health', (_, res) => res.json({ ok: true, app: 'show-control', show: show.name, addresses: lanAddresses(), devices: [...devices.values()].map(d => ({ id: d.id, status: d.status })) }));
+app.get('/api/health', (_, res) => res.json({ ok: true, app: 'show-control', version: require('../package.json').version, show: show.name, addresses: lanAddresses(), devices: [...devices.values()].map(d => ({ id: d.id, status: d.status })) }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 // A stand-in screen (features/remote.js: button boxes, OSC, MIDI, timecode) is handled exactly like a real one.

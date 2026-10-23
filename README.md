@@ -302,6 +302,22 @@ and the console's "cues changed" notices. The simulator answers the way the Eos 
   `Show Control/Training`. The real show isn't running while training, so don't start it during a
   performance; the backup computer doesn't copy it or take over meanwhile.
 
+## Updates
+
+System > Updates updates Show Control from the iPad in one tap (the Mac and Windows downloads).
+It asks GitHub for the newest release (the show computer needs internet, which the control network
+gives it), shows what's new, downloads the version for this computer, checks it, unpacks it into
+`Show Control/App versions` and restarts into it: about 20 seconds, and every screen reconnects.
+The folder you double-click stays the same, and starting with the computer keeps working.
+
+- If the new version doesn't start (or isn't running within two minutes), Show Control goes back to
+  the one before by itself and an alert says so.
+- *Go back to …* returns to the previous version at any time.
+- No internet on the show computer: download the .zip on a phone or another computer and send it
+  from the same card.
+- Updating is blocked while the show is locked and in training mode. The backup computer can be
+  updated while it's on standby.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:

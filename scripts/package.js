@@ -79,6 +79,10 @@ so nobody can change the cue list or setup by accident. Every saved cue
 list is kept (Edit cues > Undo / history), and everything is backed up
 every night into the "Show Control" folder in your home folder.
 
+UPDATES: on the iPad, System > Updates updates Show Control in one tap
+(the show computer needs internet). If the new version doesn't start, the
+one before carries on by itself.
+
 AFTER THE SHOW: a report of every cue and any problems is saved as a
 PDF in the "Show reports" folder and sent to your phone.
 

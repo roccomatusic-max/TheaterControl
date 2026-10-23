@@ -16,3 +16,8 @@ body.training header { background: repeating-linear-gradient(135deg, #1b1430 0 1
 .troublerow.down b { color: #ffb4b6; }
 .troublerow.fail b { color: #f8d48a; }
 .troublerow select { width: auto; min-width: 200px; }
+
+/* System > Updates */
+.updbar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 4px 0 8px; }
+.updbar i { display: block; height: 100%; background: var(--go); transition: width .3s; }
+.updnotes { margin: 0 0 10px; padding-left: 20px; color: var(--dim); font-size: 14px; display: grid; gap: 3px; }
