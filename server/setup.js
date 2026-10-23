@@ -4,8 +4,9 @@
 //  - realTemplate(): the practice device list with addresses blanked, so cues keep working
 //  - cleanDevices(): validates what the Setup screen sends before it is saved
 const os = require('os');
-const net = require('net');
+const { execFile } = require('child_process');
 const drivers = require('./drivers');
+const catalog = require('./catalog');
 
 // Settings that only make sense for the simulators (fake ports, fast warm-up) are never copied to a real show.
 const SIM_ONLY = ['port', 'pjlinkPort', 'gapMs', 'warmupMs', 'cooldownMs', 'pollMs', 'inputs', 'password'];
@@ -50,12 +51,37 @@ const PLAIN = {
   ENOTFOUND: 'That name could not be found. Use the number address instead (like 10.101.50.20).',
 };
 
+// Does anything answer a ping at `host`? true/false, or null when ping isn't available here.
+function ping(host) {
+  const args = process.platform === 'win32' ? ['-n', '1', '-w', '1500', host] : process.platform === 'darwin' ? ['-c', '1', '-t', '2', host] : ['-c', '1', '-W', '2', host];
+  return new Promise(resolve => execFile('ping', args, { timeout: 4000 }, (err, out) => {
+    if (err?.code === 'ENOENT') return resolve(null);
+    resolve(!err && (process.platform !== 'win32' || /TTL=/i.test(out)));
+  }));
+}
+
+// Equipment that never answers back (OSC to grandMA3, DMX, ...): all a test can do is check the address is there.
+async function testOneWay(dc) {
+  const how = 'This kind of equipment does not answer back, so check it reacts with "Try it now" in the cue editor.';
+  if (!dc.host && drivers[dc.type]?.meta?.addressOptional) return { ok: true, oneWay: true, detail: `Ready to send to everything listening on universe ${dc.universe ?? drivers[dc.type].meta.defaults?.universe ?? 1}. ${how}` };
+  if (/^127\./.test(dc.host) || dc.host === 'localhost') return { ok: true, oneWay: true, detail: `Ready (on this computer). ${how}` };
+  const near = sameNetwork(dc.host);
+  const up = await ping(dc.host);
+  if (up) return { ok: true, oneWay: true, detail: `Something is at that address. ${how}` };
+  const off = near === false ? ` Also, ${dc.host} is not on the same network as this computer (${localNetworks().map(n => n.address).join(', ') || 'no network'}).` : '';
+  if (up === false) return { ok: false, oneWay: true, detail: `Nothing answered at that address (some computers ignore this check because of their firewall, so it may still work).${off} ${how}` };
+  return { ok: near !== false, oneWay: true, detail: `Can't check this one from here.${off} ${how}` };
+}
+
 // Starts a throwaway copy of the real driver and waits for it to hear from the device.
 function testDevice(dc, ms = 6000) {
   const D = drivers[dc.type];
   if (!D) return Promise.resolve({ ok: false, detail: 'Unknown kind of equipment.' });
+  if (catalog.isOneWay(dc)) return testOneWay(dc);
   if (!dc.host) return Promise.resolve({ ok: false, detail: 'Type the address first.' });
   const near = sameNetwork(dc.host);
+  const templates = catalog.templatesFor(dc.profile);
+  if (templates) dc = { ...dc, templates };
   return new Promise(resolve => {
     let lastErr = '';
     let d;
@@ -71,9 +97,7 @@ function testDevice(dc, ms = 6000) {
       if (lr?.outcome === 'auth_failed') return resolve({ ok: false, detail: 'The device answered, but the password was wrong.' });
       const code = Object.keys(PLAIN).find(k => lastErr.includes(k));
       let detail = code ? PLAIN[code] : 'No answer from that address.';
-      if (!code && ['qlab', 'ptz'].includes(dc.type)) detail += dc.type === 'qlab'
-        ? ' Check QLab is open with your show, and that OSC access is turned on.'
-        : ' Check the camera is on, and that VISCA over IP is turned on in its settings.';
+      if (!code && HINTS[dc.type]) detail += ` ${HINTS[dc.type]}`;
       if (near === false) detail += ` Also, ${dc.host} is not on the same network as this computer (${localNetworks().map(n => n.address).join(', ') || 'no network'}).`;
       resolve({ ok: false, detail });
     };
@@ -84,6 +108,17 @@ function testDevice(dc, ms = 6000) {
   });
 }
 
+// What to check when a device stays silent, by kind.
+const HINTS = {
+  qlab: 'Check QLab is open with your show, and that OSC access is turned on.',
+  ptz: 'Check the camera is on, and that VISCA over IP is turned on in its settings.',
+  x32: 'Check the mixer is on and that this is its network address (SETUP > Network on the desk).',
+  applemidi: 'Check the network MIDI session on the other computer is ticked (enabled) and lets "Anyone" connect, and that the port is right.',
+  companion: 'Check Companion is running on that computer, and the port matches the one in Companion\'s launcher window.',
+  'panasonic-cam': 'Check the camera is on, and try its address in a web browser.',
+  grandma: 'Check Telnet login is enabled on the console (Setup > Console > Global Settings).',
+};
+
 function describe(dc, d) {
   const s = d.state || {};
   switch (dc.type) {
@@ -93,6 +128,11 @@ function describe(dc, d) {
     case 'ptz': return 'The camera answered.';
     case 'shure': { const linked = (s.channels || []).filter(c => c.tx).length; return `The receiver answered${linked ? `: ${linked} pack${linked > 1 ? 's' : ''} switched on` : ''}.`; }
     case 'panasonic': case 'pjlink': return `The projector answered${s.power ? `: ${s.power}` : ''}${s.info?.name ? ` (${s.info.name})` : ''}.`;
+    case 'x32': return `Connected to the mixer${s.model ? ` (${s.model})` : ''}.`;
+    case 'panasonic-cam': return `The camera answered${s.power != null ? `: ${s.power ? 'on' : 'standby'}` : ''}.`;
+    case 'applemidi': return `MIDI session open${s.peer ? ` with "${s.peer}"` : ''}.`;
+    case 'companion': return 'Companion answered.';
+    case 'grandma': return `Connected to the console${s.lastReply ? `: "${s.lastReply.slice(0, 60)}"` : ''}.`;
     default: return 'Connected.';
   }
 }
@@ -110,10 +150,11 @@ function cleanDevices(list) {
     const name = String(d.name || '').trim() || id;
     const host = String(d.host || '').trim();
     if (host && !isIPv4(host) && !/^[A-Za-z0-9.-]+$/.test(host)) throw new Error(`${name}: "${host}" is not an address`);
+    if (d.profile != null && !catalog.profileById(d.profile)) delete d.profile; // a brand entry that no longer exists: keep the driver
     const out = { ...d, id, name, host };
-    if (!host) out.enabled = false; else delete out.enabled;
+    if (!host && !drivers[d.type].meta?.addressOptional) out.enabled = false; else delete out.enabled;
     return out;
   });
 }
 
-module.exports = { realTemplate, testDevice, cleanDevices, localNetworks, sameNetwork };
+module.exports = { realTemplate, testDevice, cleanDevices, localNetworks, sameNetwork, ping };

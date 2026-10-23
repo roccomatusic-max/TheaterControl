@@ -193,6 +193,28 @@ button.primary { background: var(--go-d); border-color: var(--go); font-weight: 
 #conn { cursor: pointer; }
 .form.two { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 
+/* Add equipment list, network search results, guided set-up */
+.picker input[type=search] { width: 100%; margin-bottom: 6px; }
+.pickcat h4 { margin: 14px 0 6px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+.picklist { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.picklist button { text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.picklist small { color: var(--dim); font-size: 12px; }
+.found { display: grid; gap: 6px; }
+.foundrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.foundrow:last-child { border-bottom: 0; }
+.foundrow > div { min-width: 0; }
+.foundrow .good { color: #7ee2a2; white-space: nowrap; } .foundrow .bad { color: #f8d48a; white-space: nowrap; }
+.wizard h2 { margin: 0 0 10px; font-size: 22px; }
+.wizard p { line-height: 1.5; }
+.wizard details summary { cursor: pointer; color: var(--dim); margin-top: 10px; }
+.wizsteps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 0; overflow-x: auto; scrollbar-width: none; }
+.wizsteps li { flex: 1 0 auto; }
+.wizsteps button { width: 100%; min-height: 38px; font-size: 13px; color: var(--dim); }
+.wizsteps li.on button { background: var(--blue); border-color: var(--blue); color: var(--text); }
+.wizsteps li.done button { color: #7ee2a2; }
+.wizsteps button:disabled { opacity: .5; }
+
+
 /* Level meters (mixer inputs): green to -18 dB, amber to -6, red above */
 .fm { display: flex; gap: 4px; }
 .meter { position: relative; width: 8px; height: 220px; border-radius: 3px; overflow: hidden; background: linear-gradient(to top, var(--go) 0 70%, var(--amber) 70% 90%, var(--red) 90%); }

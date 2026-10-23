@@ -1,6 +1,7 @@
 // Yamaha TF1/TF3/TF5 via the Yamaha remote control protocol (plain text over TCP port 49280,
 // same family as CL/QL/RIVAGE "RCP"). Fader levels are in 0.01 dB; -32768 means -inf.
 // Mixer must be on the same subnet; no setup on the desk beyond its IP address.
+// series "cl": CL, QL, RIVAGE PM and DM7 speak the same protocol; only scene recall differs.
 // Input meters: "mtrstart <meter path> <interval ms>" asks the desk to stream
 //   NOTIFY mtr <meter path> <type> <hex byte per channel>…
 // UNVERIFIED on TF firmware: the meter path and byte scale are configurable ("meterPath",
@@ -125,6 +126,8 @@ class YamahaTFDriver extends Driver {
         return this.write(`set ${a.strip === 'dca' ? P.dcaOn : a.strip === 'master' ? P.stOn : P.inOn} ${a.index ?? 0} 0 ${a.on ? 1 : 0}`);
       case 'scene': // { bank: 'a'|'b', scene }
         this.patch({ lastScene: `${(a.bank || 'a').toUpperCase()}${a.scene}` });
+        // CL/QL/RIVAGE/DM7 have one scene list ("MIXER:Lib/Scene"); TF has banks A and B
+        if (this.cfg.series === 'cl') return this.write(`ssrecall_ex MIXER:Lib/Scene ${a.scene}`);
         return this.write(`ssrecall_ex scene_${a.bank || 'a'} ${a.scene}`);
       case 'raw': return this.write(String(a.line));
       default: return super.command(cmd);

@@ -9,6 +9,8 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const drivers = require('./drivers');
 const setup = require('./setup');
+const catalog = require('./catalog');
+const discover = require('./discover');
 const { MicPlan, validateMics } = require('./mics');
 const FeedbackWatch = require('./feedback');
 const createCrew = require('./crew');
@@ -50,7 +52,9 @@ for (const dc of cfg.devices) {
   if (dc.enabled === false) continue;
   const D = drivers[dc.type];
   if (!D) { console.warn(`unknown device type ${dc.type}`); continue; }
-  const d = new D(dc);
+  // ready-made commands of the brand picked on the Setup screen, plus any written into show.json
+  const templates = { ...(catalog.templatesFor(dc.profile) || {}), ...(dc.templates || {}) };
+  const d = new D(Object.keys(templates).length ? { ...dc, templates } : dc);
   d.on('log', log);
   d.on('changed', () => { queueDevice(d); micPlan?.refresh(); });
   d.on('meters', onMeters);
@@ -123,7 +127,7 @@ async function runAction(a, source) {
   // Group commands go out concurrently; each projector reports its own outcome.
   return Promise.all(targets.map(async d => {
     let r;
-    try { r = (await d.command(a.cmd, a.args || {})) || { outcome: 'sent' }; }
+    try { r = await d.command(a.cmd, a.args || {}); if (!r || typeof r !== 'object') r = { outcome: 'sent' }; }
     catch (e) { r = { outcome: 'not_sent', detail: e.message }; }
     if (a.cmd !== 'move' && a.cmd !== 'zoom') {
       log({ device: d.id, level: LEVEL[r.outcome] || 'error', msg: `${a.cmd} ${JSON.stringify(a.args || {})} → ${r.outcome}${r.detail ? `: ${r.detail}` : ''} (${source})`, t: Date.now() });
@@ -228,12 +232,12 @@ async function emergencyStop(who) {
   const actions = [
     ...[...devices.values()].filter(d => d.type === 'qlab').map(d => ({ device: d.id, cmd: 'panic' })),
     ...(projectors().length ? [{ device: 'group:all', cmd: 'shutter', args: { closed: true } }] : []),
-    ...[...devices.values()].filter(d => d.type === 'ptz').flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
+    ...[...devices.values()].filter(d => d.type === 'ptz' || d.type === 'panasonic-cam').flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
     ...(cfg.safety?.emergency || []),
   ];
   log({ device: 'show', level: 'error', msg: `EMERGENCY STOP by ${who}`, t: Date.now() });
   const results = (await Promise.all(actions.map(a => runAction(a, `EMERGENCY ${who}`).catch(e => [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }])))).flat()
-    .filter(r => !(r.outcome === 'sent' && devices.get(r.device)?.type === 'ptz'))
+    .filter(r => !(['sent', 'ok'].includes(r.outcome) && ['ptz', 'panasonic-cam'].includes(devices.get(r.device)?.type)))
     // a projector in standby is already dark, so a refused shutter-close there is not a problem
     .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
   show.emergency = { at: Date.now(), by: who, results };
@@ -271,8 +275,13 @@ function setupInfo() {
   if (SUPERVISED) try { autostart = require('../launcher/autostart').status(); } catch { /* not available on this system */ }
   const pin = (MODE === 'practice' ? live?.server?.pin : readJson(SAVE_PATH, cfg).server?.pin) || '';
   return { mode: MODE, name: (MODE === 'practice' ? live?.show?.name : show.name) || show.name.replace(/^Simulated /, ''), pin: String(pin), devices: list,
-    networks: setup.localNetworks(), autostart, supervised: SUPERVISED };
+    networks: setup.localNetworks(), autostart, supervised: SUPERVISED, firstRun: firstRun(),
+    // the "Add equipment" list, and what each kind needs to be set up
+    categories: catalog.CATEGORIES, profiles: catalog.profiles(), types: catalog.typeInfo(),
+    plugins: { ...drivers.plugins, folders: require('./plugins').dirs() } };
 }
+// Practice mode and no real show file yet: the iPad offers the guided set-up.
+const firstRun = () => MODE === 'practice' && !fs.existsSync(LIVE_PATH);
 // Saves the equipment list. action: "save" (stay in this mode), "go-live", or "practice".
 // The cue list goes with you: practice cues are copied into the real show when going live, and back.
 function saveSetup(m, who) {
@@ -357,6 +366,7 @@ wss.on('connection', (ws, req) => {
   const hello = () => ws.send(JSON.stringify({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
     ui: cfg.ui || {}, groups: groups(), mode: MODE, alerts, crew: crew.snapshot(), script: crew.script(),
+    firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
   }));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
 
@@ -390,6 +400,11 @@ wss.on('connection', (ws, req) => {
       else if (m.t === 'crew') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: crew.handle(m, who) }));
       else if (m.t === 'setup-get') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: setupInfo() }));
       else if (m.t === 'setup-test') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await setup.testDevice(m.device || {}) }));
+      else if (m.t === 'setup-discover') {
+        // look for equipment near the addresses already typed in, as well as on this computer's own networks
+        const hosts = [...new Set([...cfg.devices, ...(m.devices || [])].map(d => d.host).filter(Boolean))];
+        ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await discover.discover({ hosts }) }));
+      }
       else if (m.t === 'setup-save') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: saveSetup(m, who) }));
       else if (m.t === 'autostart') {
         if (!SUPERVISED) throw new Error('Only available when Show Control is started by double-clicking it');
