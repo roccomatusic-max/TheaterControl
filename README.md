@@ -199,6 +199,31 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   main GO leaves that department out until it is handed back. Each device's department comes from its
   type; `"dept": "proj"` on a device in the show file overrides it.
 
+## Buttons, MIDI and timecode
+
+Set up on System > Buttons, MIDI and timecode.
+
+- **Keyboard, foot pedal or page turner**: switch it on per screen. Space, Enter, Page Down or → is
+  GO; Page Up or ← moves standby back one cue. A Bluetooth page-turner pedal works on the iPad.
+- **Stream Deck and button boxes**: switch on the remote web address (admin). Each button calls
+  `http://<show computer>:8080/remote/<key>/go` (or `back`, `next`, `stop`, `fire/<cue number>`,
+  `dept/<department>`, `state`). In Bitfocus Companion use a "Generic: HTTP Requests" connection.
+  The key is in the show file (`"remote": { "key": … }`), so treat it like a PIN.
+- **OSC** (off until switched on, UDP port 53535): `/showcontrol/go`, `/back`, `/next`, `/stop`,
+  `/fire <cue>`, `/dept/<department>/go`, `/timecode "01:02:03:04"`. A value of 0 (a button being
+  let go) is ignored. Works from Companion, TouchOSC, QLab Network cues and Eos cues.
+- **MIDI**: tap *Learn GO* (or Back, STOP, a department's GO) and press the MIDI button. MIDI arrives
+  from network MIDI equipment, or from a MIDI device plugged into a computer that has Show Control
+  open in Chrome or Edge with "Use MIDI devices plugged into this computer" on. MIDI Show Control GO
+  from a console can run GO (with a cue number it fires the cue with that number).
+- **Timecode**: give a cue a timecode in *Edit cues* and switch on *Fire cues at their timecode*.
+  MIDI timecode (from QLab or a playback computer) or OSC timecode fires each cue as it plays past
+  it. A jump in the timecode (scrubbing or a locate) fires nothing. The pre-show check warns when
+  following is off or no timecode has arrived.
+
+Buttons, OSC and MIDI go through the same checks as an operator's screen: the show lock applies, and
+a backup computer on standby ignores them.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:

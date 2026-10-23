@@ -152,7 +152,9 @@ function validateCues(cues) {
     const tasks = (Array.isArray(c.crew) ? c.crew : []).filter(x => x && typeof x.role === 'string' && x.role.trim())
       .map(x => ({ role: x.role.trim(), task: String(x.task || '').trim() }));
     const scene = String(c.scene ?? '').trim().slice(0, 80); // starts a new scene on the scene map
-    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(scene ? { scene } : {}), ...(c.note ? { note: String(c.note) } : {}), ...(tasks.length ? { crew: tasks } : {}), actions };
+    const tc = String(c.tc ?? '').trim().replace(/[;.]/g, ':'); // fires by itself at this timecode (features/remote.js)
+    if (tc && !/^\d{1,2}:\d{2}:\d{2}:\d{2}$/.test(tc)) throw new Error(`cue ${i + 1}: timecode must look like 01:02:03:04 (hours:minutes:seconds:frames)`);
+    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(scene ? { scene } : {}), ...(tc ? { tc } : {}), ...(c.note ? { note: String(c.note) } : {}), ...(tasks.length ? { crew: tasks } : {}), actions };
   });
 }
 function saveCues(cues, who, note) {
@@ -297,7 +299,7 @@ const ctx = {
     writeJson(SETTINGS_PATH, { ...cur, ...patch });
   },
 };
-for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report']) require(`./features/${f}`)(ctx);
+for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report', 'remote']) require(`./features/${f}`)(ctx);
 
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
@@ -334,6 +336,8 @@ app.use(express.static(path.join(__dirname, '../public'), { maxAge: 0 }));
 app.get('/api/health', (_, res) => res.json({ ok: true, app: 'show-control', show: show.name, addresses: lanAddresses(), devices: [...devices.values()].map(d => ({ id: d.id, status: d.status })) }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+// A stand-in screen (features/remote.js: button boxes, OSC, MIDI, timecode) is handled exactly like a real one.
+ctx.attachScreen = (ws, label) => wss.emit('connection', ws, { socket: { remoteAddress: label } });
 function broadcast(msg) {
   const s = JSON.stringify(msg);
   for (const c of wss.clients) if (c.authed && c.readyState === 1) c.send(s);

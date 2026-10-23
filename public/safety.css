@@ -105,3 +105,13 @@ button.rep { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; tex
 button.rep span:nth-child(2) { color: var(--dim); }
 a.btnlink { display: block; text-align: center; text-decoration: none; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-weight: 700; }
 a.btnlink.primary { background: var(--go-d); border-color: var(--go); }
+
+/* Buttons, MIDI and timecode (see inputs.js) */
+.tcchip { display: inline-flex; gap: 8px; align-items: center; margin-top: 6px; min-height: 30px; padding: 3px 10px; font-size: 12px; border-radius: 99px; }
+.tcchip span { color: var(--dim); }
+.tcchip.run b { color: #7ee2a2; }
+.tcchip.follow { border-color: var(--go); }
+p.small, .small { font-size: 13px; }
+.urls { display: grid; gap: 4px; word-break: break-all; background: var(--panel2); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+.oscport { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px 36px; font-size: 14px; color: var(--dim); }
+.learning { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: #3a2c0b; color: #f8d48a; font-weight: 700; }

@@ -534,6 +534,7 @@ function editTab() {
           h('label', { style: 'flex:0 0 110px' }, 'Number', h('input', { inputmode: 'decimal', value: c.number ?? '', onchange: e => { c.number = e.target.value === '' ? '' : isNaN(e.target.value) ? e.target.value : Number(e.target.value); ed.dirty = true; } })),
           h('label', { style: 'flex:1' }, 'Name', h('input', { value: c.label, onchange: e => { c.label = e.target.value; ed.dirty = true; } }))),
         h('label', {}, 'Note for the operator (optional)', h('input', { value: c.note || '', placeholder: 'e.g. On SM call', onchange: e => { c.note = e.target.value; ed.dirty = true; } })),
+        h('label', {}, 'Fires by itself at timecode (optional, hours:minutes:seconds:frames)', h('input', { value: c.tc || '', placeholder: 'e.g. 00:03:12:05', inputmode: 'numeric', onchange: e => { c.tc = e.target.value.trim(); ed.dirty = true; } })),
         h('label', {}, 'Starts a new scene (optional, for the scene map)', h('input', { value: c.scene || '', placeholder: 'e.g. Act 1 · Scene 2: The ball', onchange: e => { c.scene = e.target.value; ed.dirty = true; } })),
         h('div', { class: 'sub' }, 'What this cue does'),
         c.actions.map((a, i) => actionEditor(a, c.actions, i, redraw)),
