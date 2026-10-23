@@ -272,14 +272,20 @@ const ctx = {
   guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
   // Replaced by features/access.js (PINs per role); this is the single-PIN behaviour without it.
   access: { required: () => !!PIN, hint: () => ({}), roleFor: pin => (!PIN || String(pin) === String(PIN) ? 'admin' : null) },
-  clients: () => [...wss.clients].filter(c => c.authed && c.readyState === 1),
+  clients: () => [...wss.clients].filter(c => c.authed && c.readyState === 1 && !c.mirror),
+  // Equipment connections open once the server is listening, unless a feature holds them (the
+  // backup computer on standby). Each device is started at most once per run.
+  holdDevices: false,
+  startDevices() { if (this.devicesStarted) return; this.devicesStarted = true; for (const d of devices.values()) d.start(); },
+  stopDevices() { if (this.devicesStarted) for (const d of devices.values()) d.stop(); },
+  saveState: () => saveState(),
   settings: () => readJson(SETTINGS_PATH, null) ?? readJson(SAVE_PATH, cfg),
   saveSettings(patch) {
     const cur = readJson(SETTINGS_PATH, null) ?? (MODE === 'practice' ? { live: false } : readJson(SAVE_PATH, cfg));
     writeJson(SETTINGS_PATH, { ...cur, ...patch });
   },
 };
-for (const f of ['health', 'access', 'lock', 'versions', 'backups']) require(`./features/${f}`)(ctx);
+for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens']) require(`./features/${f}`)(ctx);
 
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
@@ -379,13 +385,14 @@ server.listen(PORT, cfg.server?.host || '0.0.0.0', () => {
   const urls = lanAddresses().map(a => a.url);
   console.log(`Show Control "${show.name}" using ${cfgPath}`);
   console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${ctx.access.required() ? '  (PIN required)' : ''}`);
-  for (const d of devices.values()) d.start();
+  if (!ctx.holdDevices) ctx.startDevices();
+  events.emit('listening');
   server.emit('ready', { port: PORT, urls });
 });
 
 module.exports = { server, lanAddresses };
 
-function shutdown() { for (const d of devices.values()) d.stop(); process.exit(0); }
+function shutdown() { ctx.stopDevices(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 // A bug in one driver must not take the whole show down: log it and keep running.
 process.on('uncaughtException', e => log({ device: 'core', level: 'error', msg: `internal error (kept running): ${e.stack || e.message}`, t: Date.now() }));

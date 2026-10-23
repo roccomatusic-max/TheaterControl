@@ -29,8 +29,9 @@ const byType = t => Object.values(S.devices).filter(d => d.type === t);
 
 // ---------- connection ----------
 let ws, wsTimer;
+let wsHost = () => location.host; // failover.js moves to the backup computer when this one stops
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${wsHost()}/ws`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500); };
   ws.onmessage = e => handle(JSON.parse(e.data));
@@ -166,6 +167,7 @@ function cueDevices(cue) {
     ? (S.groups.find(g => g.id === a.device.slice(6))?.members || []) : [a.device]))];
 }
 function warnLine(cue) {
+  if (S.failover && !S.failover.active) return ''; // a standby computer never connects to the equipment
   const off = cueDevices(cue).map(id => S.devices[id]).filter(d => d && d.status !== 'online');
   return off.length ? h('div', { class: 'warnline' }, `⚠ Not connected: ${off.map(d => d.name.split(' · ')[0]).join(', ')}`) : '';
 }

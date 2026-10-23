@@ -157,6 +157,26 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   A cue list can be put back from any backup. The pre-show check warns when the last backup is
   missing, old or had a problem.
 
+## Backup computer and spare screens
+
+- **Backup computer** (System > Backup computer): a second computer running Show Control, plugged
+  into both networks like the main one, with the same admin PIN. On the main computer choose "Main
+  computer" and type the backup's address; on the backup choose "Backup computer" and type the main
+  computer's address. Both settings are in each computer's own show file:
+  `"failover": { "role": "main", "peer": "<other computer>:8080" }`.
+  - The backup stays on standby. It copies the show as it runs (cue list, cue position, timers, the
+    show lock, settings) and never talks to the equipment.
+  - If the main computer stops answering for 5 seconds, the backup takes over with the show where it
+    was, connects to the equipment and sends an alert. The iPads and phones move across by themselves.
+  - When the main computer comes back, it waits on standby. Tap *Hand back to the main computer* on the
+    backup when it suits you (for example in the interval); the backup then restarts on standby.
+  - *Take over now* on the standby computer forces a switch. Only use it if the other one has really stopped.
+  - Not copied yet: crew screen state (calls, checklist ticks).
+- **Spare screens**: every iPad, phone and computer has a name (System > Screens, *Rename*). If one
+  breaks or goes flat, open Show Control on a spare: it offers to carry on from the screen that dropped
+  off, with the same name, tab, camera and projector group. *Carry on here* on the Screens card does
+  the same at any time.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:
@@ -223,4 +243,3 @@ extension points at the top of `public/app.js` (`VIEWS`, `SYS_CARDS`, `onMsg`, `
 - MIDI Show Control / MIDI timecode out (USB MIDI interface on the server)
 - LTC/MTC display and chase, Clear-Com/Green-GO comms status, Stream Deck via Bitfocus Companion
 - Backstage and front-of-house paging through QLab
-- Per-user roles (SM: GO only; TD: everything)

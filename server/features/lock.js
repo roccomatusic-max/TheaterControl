@@ -43,6 +43,7 @@ module.exports = function lock(ctx) {
     return { lock: state };
   };
   ctx.initExtras.push(() => ({ lock: state }));
+  ctx.events.on('mirror-lock', l => { state = l || null; save(); publish(); }); // copied from the main computer
   ctx.checks.push(() => [{ group: 'Show', state: state ? 'ok' : 'info', label: 'Show lock',
     detail: state ? 'Locked: nobody can change the cue list or setup by accident.' : 'Unlocked. Lock the show (lock button at the top) before the performance.',
     ...(state ? {} : { fix: { label: 'Lock the show', msgs: [{ t: 'show-lock', on: true }] } }) }]);

@@ -205,5 +205,6 @@ module.exports = function health(ctx) {
   ctx.handlers['alerts-phone'] = m => setPhone(m.on);
   ctx.handlers['alerts-test'] = () => push({ level: 'warn', msg: 'Test alert from Show Control. Phone alerts are working.' }, true);
   ctx.initExtras.push(() => ({ alerts: [...active.values()], lastCheck }));
+  ctx.alert = raise;
   return { raise, preshowCheck };
 };

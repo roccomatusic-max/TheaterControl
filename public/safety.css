@@ -36,3 +36,13 @@ details summary { cursor: pointer; color: var(--dim); margin: 10px 0 6px; }
 .picker .here { margin-bottom: 8px; word-break: break-all; }
 .picker .dirs { display: grid; gap: 4px; margin-top: 8px; max-height: 45vh; overflow: auto; }
 .picker .dirs button { text-align: left; }
+
+/* Backup computer banner and the Screens card (see failover.js) */
+#failoverBar { padding: 8px 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-weight: 700; }
+#failoverBar.standby { background: #12233f; color: #9cc3ff; border-bottom: 2px solid var(--blue); }
+#failoverBar.running { background: #4a1d06; color: #ffd9b0; border-bottom: 2px solid var(--amber); }
+#failoverBar a { color: inherit; }
+.screens { display: grid; gap: 6px; }
+.scr { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--panel2); border-left: 5px solid var(--go); font-size: 14px; }
+.scr.off { border-left-color: var(--red); }
+.scr .pill { margin-left: 6px; }
