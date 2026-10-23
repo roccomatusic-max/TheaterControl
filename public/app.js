@@ -53,6 +53,9 @@ function handle(m) {
     $('#pin').hidden = true;
     S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || [];
     S.mode = m.mode; setConn(true);
+    addCueCommands(m.cueCommands);
+    // first time in practice mode with no real show yet: start the guided set-up (once per iPad)
+    if (m.firstRun && !localStorage.getItem('wizardSeen') && !['wizard', 'setup'].includes(S.tab)) { S.tab = 'wizard'; S.setup = null; }
     if (S.setup?.restarting) S.setup = null; // back after a practice/live switch: reload the equipment list
     S.clockSkew = m.show.now - Date.now();
     $('#showName').textContent = m.show.name;
@@ -121,10 +124,10 @@ setInterval(() => { $('#clock').textContent = new Date(Date.now() + S.clockSkew)
 
 function render() {
   for (const k of Object.keys(updaters)) delete updaters[k];
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ({ edit: 'show', setup: 'sys' }[S.tab] || S.tab)));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ({ edit: 'show', setup: 'sys', wizard: 'sys' }[S.tab] || S.tab)));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab })[S.tab]());
+  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab]());
 }
 
 // ---------- Show tab ----------
@@ -419,7 +422,19 @@ const CMD_LABEL = { cue: 'Fire cue', go: 'GO', back: 'Back', macro: 'Fire macro'
   start: 'Start cue', stop: 'Stop all', panic: 'Panic (fade out all)', pause: 'Pause all', resume: 'Resume all', playhead: 'Move playhead to',
   scene: 'Recall scene', level: 'Set fader', on: 'Fader on/off', preset: 'Go to preset', home: 'Home', tally: 'Tally light',
   shutter: 'Shutter', power: 'Power', input: 'Input', send: 'Send OSC' };
-const kindOf = id => String(id).startsWith('group:') ? 'projector' : PROJ_TYPES.includes(S.devices[id]?.type) ? 'projector' : S.devices[id]?.type;
+// Commands the server describes (newer drivers, plugins, brands with ready-made commands) are added to the list above.
+function addCueCommands(cc) {
+  if (!cc) return;
+  Object.assign(CATALOG, cc.catalog || {});
+  Object.assign(CMD_LABEL, cc.labels || {});
+}
+// The command list to use for a device: its brand's ready-made commands if it has some, else its driver's.
+const kindOf = id => {
+  if (String(id).startsWith('group:') || PROJ_TYPES.includes(S.devices[id]?.type)) return 'projector';
+  const d = S.devices[id];
+  return d?.profile && CATALOG[d.profile] ? d.profile : d?.type;
+};
+const cmdLabel = (kind, c) => CMD_LABEL[`${kind}:${c}`] || CMD_LABEL[c] || c;
 const targets = () => [
   ...Object.values(S.devices).map(d => ({ id: d.id, label: d.name })),
   ...S.groups.map(g => ({ id: `group:${g.id}`, label: `Projectors: ${g.name}` })),
@@ -454,7 +469,7 @@ function actionEditor(a, list, i, redraw) {
     h('label', {}, 'Device', h('select', { onchange: e => { a.device = e.target.value; const c = Object.keys(CATALOG[kindOf(a.device)])[0]; a.cmd = c; a.args = defaultsFor(a.device, c); redraw(); } },
       targets().map(t => h('option', { value: t.id, selected: t.id === a.device }, t.label)))),
     h('label', {}, 'Do', h('select', { onchange: e => { a.cmd = e.target.value; a.args = defaultsFor(a.device, a.cmd); redraw(); } },
-      Object.keys(cmds).map(c => h('option', { value: c, selected: c === a.cmd }, CMD_LABEL[c] || c)))),
+      Object.keys(cmds).map(c => h('option', { value: c, selected: c === a.cmd }, cmdLabel(kind, c))))),
     h('div', { class: 'args' }, (cmds[a.cmd] || []).map(f => field(a, f, () => {})),
       h('label', {}, 'Delay (s)', h('input', { inputmode: 'decimal', value: a.delay || 0, onchange: e => (a.delay = Math.max(0, Number(e.target.value) || 0)) }))),
     h('div', { class: 'tools' },
@@ -599,7 +614,7 @@ function camCard(cam, expanded) {
   return card;
 }
 function camTab() {
-  const cams = byType('ptz');
+  const cams = [...byType('ptz'), ...byType('panasonic-cam')];
   if (!cams.length) return h('div', { class: 'card' }, 'No cameras configured.');
   S.camSel ||= cams[0].id;
   const tabs = h('div', { class: 'row', style: 'margin-bottom:10px' },

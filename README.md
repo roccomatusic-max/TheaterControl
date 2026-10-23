@@ -12,7 +12,22 @@ and used from an iPad or phone in a browser. It works with no internet.
 | Camera video | go2rtc / MediaMTX → WebRTC, or MJPEG/HLS | Live view on the iPad, low latency |
 | Panasonic projectors (PT-DZ13K, PT-DZ770 series) | Panasonic LAN protocol, TCP 1024 (+ PJLink for health) | Power with confirmation, shutter, inputs, lamp hours, fan/lamp/temperature health, lens home |
 | Any PJLink projector / display | PJLink class 1, TCP 4352 | Power, shutter, inputs, lamp hours, health, make/model |
-| Anything else | Generic OSC out | Resolume, Millumin, Companion, TouchDesigner… |
+| grandMA2 / grandMA3 | Telnet (MA2) / OSC (MA3) command line | GO, go to cue, back, off, macros, any command line |
+| ChamSys MagicQ | OSC over UDP | Playback GO, stop, release, jump to cue, level |
+| Behringer X32 / Midas M32 / X Air / MR | OSC over UDP 10023 / 10024 | Faders and on/off, two-way, scene/snapshot recall (same cue steps as the TF) |
+| Yamaha CL / QL / RIVAGE / DM7 | Same protocol as the TF | As TF; scene recall from the one scene list |
+| Allen & Heath SQ / Qu / Avantis / dLive | MIDI over TCP | Scene recall, raw MIDI |
+| Panasonic PTZ cameras (AW-UE, AW-HE) | HTTP CGI | Same as the VISCA cameras |
+| Haze, fog, LED, anything DMX | sACN (E1.31) or Art-Net out | Levels with fades, raw values |
+| Anything with MIDI | RTP-MIDI (Apple Network MIDI / rtpMIDI) | MIDI Show Control, notes, CC, program change |
+| 700+ other kinds of gear | Bitfocus Companion (HTTP) | Press any Companion button from a cue: ATEM, Avolites, Hog, DiGiCo, vMix… |
+| Anything else | OSC, text over TCP/UDP, HTTP | With ready-made commands for Resolume, Millumin, HyperDeck, Videohub, Watchout, Shelly |
+
+**Setting it up from the iPad:** System > Guided set-up walks through it one step at a time.
+"Find equipment on the network" asks the show network what's there (PJLink, Panasonic, Yamaha,
+X32, Art-Net consoles and nodes, Sony-style cameras, QLab, Companion, HyperDeck...), and
+"Add equipment" has 50+ makes and models with what to press on each one.
+New kinds of equipment can be added as plugins without changing the app: see [plugins/README.md](plugins/README.md).
 
 **Show cues** tie it together: one GO can fire an Eos cue, a QLab cue, a TF scene and camera
 presets, with optional per-action delays. There are also show/act timers, a lock button so a
@@ -152,19 +167,24 @@ For recording or streaming the show, OBS on the server can take the same feeds.
 ```
 server/index.js          HTTP + WebSocket hub, show cue stack, timers, PIN, log
 server/drivers/*.js      one driver per device type; each exposes status, state, command()
+server/catalog.js        the "Add equipment" list: makes/models → driver, defaults, set-up steps
+server/discover.js       "Find equipment on the network"
+server/plugins.js        loads extra drivers from plugins/ and ~/Show Control/plugins/
 server/lib/osc.js        OSC encode/decode + SLIP framing (no dependencies)
 public/                  the iPad/phone app (plain JS/CSS, no build step, no CDN)
 sim/                     protocol-accurate fake devices
 config/*.json            device list, show cues, UI layout
 ```
 
-Adding a device type means adding one file in `server/drivers/` and one line in `drivers/index.js`.
+Adding a device type means adding one file in `server/drivers/` and one line in `drivers/index.js`
+(or dropping a plugin file in `plugins/`). Adding another brand of something already supported is
+one line in `server/catalog.js`.
 
 ## Next ideas
 
 - Projection mapping (shared with Projector Control's mapping module)
 - Cue editor in the UI (today cues are edited in `config/show.json`)
-- MIDI Show Control / MIDI timecode out (USB MIDI interface on the server)
-- LTC/MTC display and chase, Clear-Com/Green-GO comms status, Stream Deck via Bitfocus Companion
+- MIDI timecode out
+- LTC/MTC display and chase, Clear-Com/Green-GO comms status
 - Backstage and front-of-house paging through QLab
 - Per-user roles (SM: GO only; TD: everything)

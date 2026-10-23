@@ -62,7 +62,17 @@ const KINDS = {
     ],
   },
 };
-const kindLabel = t => KINDS[t]?.label || t;
+// Everything the screen knows about one piece of equipment: the brand picked from the list (server),
+// what its driver says about itself (server), and the built-in help above.
+function kindFor(st, d) {
+  const p = (st.profiles || []).find(x => x.id === d.profile);
+  const t = st.types?.[d.type], base = KINDS[d.type];
+  const help = p?.help || (p?.helpBefore && base ? [...p.helpBefore, ...base.help] : null) || t?.help || base?.help || [];
+  return { label: p?.label || base?.label || t?.label || d.type, fields: p?.fields || t?.fields || base?.fields || [], help,
+    idBase: base?.idBase || ID_BASE[p?.category || t?.category] || 'dev', addressOptional: t?.addressOptional || null, note: p?.note };
+}
+const ID_BASE = { lighting: 'lx', sound: 'mixer', playback: 'play', cameras: 'cam', projection: 'proj', effects: 'fx', other: 'dev' };
+const kindLabel = t => KINDS[t]?.label || S.setup?.types?.[t]?.label || t;
 
 function ask(t, payload = {}, ms = 20000) {
   const id = ++cmdSeq;
@@ -76,23 +86,170 @@ function ask(t, payload = {}, ms = 20000) {
 // "10.101.something" for a 255.255.0.0 network: the part of the address every device must share.
 const samePart = n => { const k = n.netmask.split('.').filter(x => x === '255').length || 3; return `${n.address.split('.').slice(0, k).join('.')}${'.something'.repeat(4 - k)}`; };
 
+// Loads the equipment list once; returns a "loading" card until it's here.
+function setupLoading() {
+  const st = S.setup;
+  if (st && !st.loading) return null;
+  if (!st) {
+    S.setup = { loading: true, tests: {}, help: {} };
+    ask('setup-get').then(r => {
+      if (r.error) { toast(r.error, 6000); S.setup = null; return; }
+      S.setup = { ...r, devices: JSON.parse(JSON.stringify(r.devices)), tests: {}, help: {}, dirty: false };
+      if (['setup', 'wizard'].includes(S.tab)) render();
+    });
+  }
+  return h('div', { class: 'card' }, 'Loading your equipment list…');
+}
+const redrawKeepScroll = () => { const m = $('#main'), y = m.scrollTop; render(); m.scrollTop = y; };
+
+function addDevice(st, p, extra = {}) {
+  const k = kindFor(st, { type: p.type, profile: p.id });
+  let n = 1;
+  while (st.devices.some(d => d.id === `${k.idBase}${n}`)) n++;
+  const id = `${k.idBase}${n}`;
+  const short = p.label.split(' (')[0].replace(/^ETC |^Yamaha |^Behringer /, '').split(' / ')[0];
+  const d = { id, type: p.type, ...(p.id !== p.type ? { profile: p.id } : {}), name: `${short} ${n}`, host: '', ...JSON.parse(JSON.stringify(p.defaults || {})), ...extra };
+  if (d.name.length > 28) d.name = `${short.slice(0, 24)} ${n}`;
+  st.devices.push(d);
+  st.dirty = true;
+  return d;
+}
+
+async function testOne(st, d) {
+  st.tests[d.id] = { running: true }; redrawKeepScroll();
+  const r = await ask('setup-test', { device: d });
+  st.tests[d.id] = r.error ? { ok: false, detail: r.error } : r; redrawKeepScroll();
+}
+
+// One piece of equipment: name, address, its own settings, test result, set-up steps.
+function deviceCard(st, d, i, { open = false } = {}) {
+  const k = kindFor(st, d);
+  const t = st.tests[d.id];
+  const edit = () => { st.dirty = true; delete st.tests[d.id]; };
+  const fieldEl = ([key, type, label, ph]) => {
+    const val = d[key] ?? '';
+    const set = v => { if (v === '' || v == null) delete d[key]; else d[key] = v; edit(); };
+    let input;
+    if (type.startsWith('select:')) {
+      const opts = type.slice(7).split('|').map(o => o.split('='));
+      input = h('select', { onchange: e => { set(e.target.value); redrawKeepScroll(); } }, opts.map(([v, l]) => h('option', { value: v, selected: String(val || opts[0][0]) === v }, l)));
+    } else {
+      const numeric = type === 'port' || type === 'number';
+      input = h('input', { type: type === 'password' ? 'password' : 'text', inputmode: numeric ? 'numeric' : 'text', autocomplete: 'off', autocapitalize: 'off', value: val, placeholder: ph || '',
+        onchange: e => set(numeric ? (e.target.value.trim() === '' ? '' : Number(e.target.value) || 0) : e.target.value.trim()) });
+    }
+    return h('label', {}, label, input);
+  };
+  const noHost = !d.host && !k.addressOptional;
+  const showHelp = st.help[d.id] ?? open;
+  return h('div', { class: `card dev ${noHost ? 'nohost' : ''}` },
+    h('div', { class: 'devhead' },
+      h('input', { class: 'name', value: d.name || '', 'aria-label': 'Name', oninput: e => { d.name = e.target.value; st.dirty = true; } }),
+      h('span', { class: 'kind' }, k.label)),
+    h('div', { class: 'form fields' },
+      h('label', {}, k.addressOptional ? 'Address (optional)' : 'Address', h('input', { inputmode: 'decimal', autocomplete: 'off', autocapitalize: 'off', value: d.host || '', placeholder: 'e.g. 10.101.50.20',
+        onchange: e => { d.host = e.target.value.trim(); edit(); redrawKeepScroll(); } })),
+      k.fields.map(fieldEl)),
+    h('div', { class: `result ${t ? (t.running ? 'run' : t.ok ? 'ok' : 'bad') : ''}` },
+      t ? (t.running ? 'Testing… (up to 6 seconds)' : `${t.ok ? '✓' : '✗'} ${t.detail}`)
+        : d.host ? 'Not tested yet' : k.addressOptional ? `No address: ${k.addressOptional}` : 'No address yet: this one is left out until it has one.'),
+    h('div', { class: 'tools' },
+      h('button', { class: 'always', disabled: noHost || t?.running, onclick: () => testOne(st, d) }, 'Test'),
+      h('button', { class: 'always', onclick: () => { st.help[d.id] = !showHelp; redrawKeepScroll(); } }, showHelp ? 'Hide steps' : 'How to set it up'),
+      h('button', { class: 'danger', onclick: () => { if (confirm(`Remove ${d.name}? Cue steps that use it will be skipped.`)) { st.devices.splice(i, 1); st.dirty = true; redrawKeepScroll(); } } }, 'Remove')),
+    showHelp && h('ol', { class: 'steps' }, k.help.map(s => h('li', {}, s))));
+}
+
+// "Add equipment": search, or browse by kind. Calls onPick(profile).
+function picker(st, onPick) {
+  st.pick ||= { q: '' };
+  const q = st.pick.q.trim().toLowerCase();
+  const match = p => !q || `${p.label} ${p.keywords || ''} ${p.category}`.toLowerCase().includes(q);
+  const box = h('div', { class: 'card picker' });
+  const search = h('input', { type: 'search', placeholder: 'Type a make or model, e.g. Epson, X32, haze…', value: st.pick.q, autocapitalize: 'off', autocomplete: 'off',
+    oninput: e => { st.pick.q = e.target.value; const pos = e.target.selectionStart; redrawKeepScroll(); const s = $('.picker input[type=search]'); if (s) { s.focus(); s.setSelectionRange(pos, pos); } } });
+  box.append(h('h3', {}, 'Add equipment'), search);
+  let any = false;
+  for (const [cat, title] of st.categories || []) {
+    const list = (st.profiles || []).filter(p => p.category === cat && match(p));
+    if (!list.length) continue;
+    any = true;
+    box.append(h('div', { class: 'pickcat' }, h('h4', {}, title),
+      h('div', { class: 'picklist' }, list.map(p => h('button', { class: 'always', onclick: () => { st.pick = null; onPick(p); } }, p.label.replace(/ \(through Companion\)$/, ''),
+        p.note && h('small', {}, p.note))))));
+  }
+  if (!any) box.append(h('p', { class: 'hint' }, 'Nothing by that name yet. Try "Anything that takes OSC", "text commands" or "Bitfocus Companion" under Anything else: between them they cover almost all show equipment. Or ask for it to be added.'));
+  box.append(h('div', { class: 'tools', style: 'margin-top:10px' }, h('button', { class: 'always', onclick: () => { st.pick = null; st.picking = false; redrawKeepScroll(); } }, 'Close')));
+  return box;
+}
+
+// "Find my equipment": what answered on the network, with an Add button for each.
+async function runDiscover(st) {
+  st.finding = { running: true }; redrawKeepScroll();
+  const r = await ask('setup-discover', { devices: st.devices }, 45000);
+  st.finding = r.error ? { error: r.error } : r; redrawKeepScroll();
+}
+const alreadyAdded = (st, f) => st.devices.find(d => d.host === f.host && (d.type === f.type || (d.profile && d.profile === f.profile)));
+function foundCard(st, { onAdd } = {}) {
+  const f = st.finding;
+  if (!f) return null;
+  if (f.running) return h('div', { class: 'card' }, h('h3', {}, 'Looking for equipment…'), h('p', { class: 'hint' }, 'Asking everything on the show network what it is. This takes about 10 seconds.'));
+  if (f.error) return h('div', { class: 'card' }, h('p', { class: 'warnline' }, `Could not search: ${f.error}`));
+  const add = x => {
+    const p = (st.profiles || []).find(p => p.id === x.profile) || (st.profiles || []).find(p => p.type === x.type) || { id: x.type, type: x.type, label: x.label, defaults: {} };
+    const d = addDevice(st, p, { host: x.host, ...(x.defaults || {}) });
+    if (x.name) d.name = x.name.slice(0, 28);
+    onAdd ? onAdd(d) : redrawKeepScroll();
+  };
+  const rows = f.found.map(x => {
+    const have = alreadyAdded(st, x);
+    return h('div', { class: 'foundrow' },
+      h('div', {}, h('b', {}, x.label), x.name && h('span', {}, ` "${x.name}"`), h('div', { class: 'mono' }, x.host),
+        h('div', { class: 'hint', style: 'margin:0' }, `${x.confidence === 'sure' ? 'It said what it is' : 'Probably: the right port is open'} (${x.detail}).`)),
+      have ? h('span', { class: 'kind' }, `Added as ${have.name}`) : h('button', { class: 'primary always', onclick: () => add(x) }, 'Add'));
+  });
+  return h('div', { class: 'card' }, h('h3', {}, f.found.length ? `Found ${f.found.length} thing${f.found.length > 1 ? 's' : ''} on the network` : 'Nothing found yet'),
+    rows.length ? h('div', { class: 'found' }, rows) : h('p', { class: 'hint' }, 'Nothing answered. Check this computer is plugged into the show network and the equipment is switched on and has an address. Some equipment cannot be found this way: add it from the list instead.'),
+    f.found.length > 0 && h('p', { class: 'hint' }, 'Not everything can be found this way (some equipment stays quiet until it is set up). Add anything missing from the list.'),
+    h('div', { class: 'tools', style: 'margin-top:10px' }, h('button', { class: 'always', onclick: () => runDiscover(st) }, 'Search again')));
+}
+
+function pluginCard(st) {
+  const pl = st.plugins;
+  if (!pl || (!pl.loaded?.length && !pl.errors?.length)) return null;
+  return h('div', { class: 'card' }, h('h3', {}, 'Plugins'),
+    pl.loaded.map(p => h('div', {}, `✓ ${p.label} `, h('span', { class: 'hint mono' }, p.file))),
+    pl.errors.map(p => h('div', { class: 'warnline' }, `✗ ${p.file}: ${p.error}`)));
+}
+
+// Saves the equipment list: action "save", "go-live" or "practice". Returns false if cancelled.
+async function saveSetupAs(st, action) {
+  const live = st.mode === 'live';
+  const noAddr = st.devices.filter(d => !d.host && !kindFor(st, d).addressOptional).map(d => d.name);
+  const failed = st.devices.filter(d => (d.host || kindFor(st, d).addressOptional) && !st.tests[d.id]?.ok).map(d => d.name);
+  if (action === 'go-live') {
+    if (!st.devices.some(d => d.host || kindFor(st, d).addressOptional)) { toast('Type at least one address first', 4000); return false; }
+    const notes = [noAddr.length && `No address yet (left out): ${noAddr.join(', ')}.`, failed.length && `Not tested or didn't answer: ${failed.join(', ')}.`].filter(Boolean);
+    if (!confirm(`${notes.length ? notes.join('\n') + '\n\n' : ''}Go live? Show Control restarts with your real equipment (about 5 seconds). Your cue list comes with you.`)) return false;
+  }
+  if (action === 'practice' && !confirm('Back to practice mode? Show Control restarts with pretend equipment. Your equipment list and cue list are kept.')) return false;
+  if (action === 'save' && live && !confirm('Save and restart Show Control (about 5 seconds)?')) return false;
+  const r = await ask('setup-save', { action, name: st.name, pin: st.pin || '', devices: st.devices });
+  if (r.error) { toast(`Not saved: ${r.error}`, 7000); return false; }
+  if (st.pin) localStorage.setItem('pin', st.pin); // this iPad signs straight back in after the restart
+  st.dirty = false;
+  const names = r.missing?.length ? r.missing.map(id => st.devices.find(d => d.id === id)?.name || id) : [];
+  if (names.length) toast(`Saved. Cue steps that use ${names.join(', ')} will be skipped until ${names.length > 1 ? 'they have addresses' : 'it has an address'}.`, 7000);
+  else toast(r.restarting ? 'Saved. Restarting…' : st.mode === 'direct' ? 'Saved. Restart Show Control to use it.' : 'Saved', 4000);
+  if (r.restarting) { st.restarting = true; S.setupRestart = true; }
+  return true;
+}
+
 function setupTab() {
+  const loading = setupLoading();
+  if (loading) return loading;
   const st = S.setup;
   const wrap = h('div', { class: 'setup' });
-  if (!st || st.loading) {
-    if (!st) {
-      S.setup = { loading: true, tests: {}, help: {} };
-      ask('setup-get').then(r => {
-        if (r.error) { toast(r.error, 6000); S.setup = null; return; }
-        S.setup = { ...r, devices: JSON.parse(JSON.stringify(r.devices)), tests: {}, help: {}, dirty: false };
-        if (S.tab === 'setup') render();
-      });
-    }
-    return h('div', { class: 'card' }, 'Loading your equipment list…');
-  }
-  const redraw = () => { const m = $('#main'), y = m.scrollTop; render(); m.scrollTop = y; };
-  const edit = () => { st.dirty = true; };
-
   const practice = st.mode === 'practice', live = st.mode === 'live';
   const nets = st.networks || [];
   wrap.append(
@@ -101,68 +258,29 @@ function setupTab() {
       h('p', {}, practice
         ? 'Show Control is using pretend equipment, so nothing real moves. Fill in your real equipment below, test each one, then tap Go live. You can come back to practice at any time.'
         : live ? 'Show Control is controlling your real equipment. Changes here restart it (about 5 seconds), so make them before the show, not during it.'
-          : 'Changes are saved to the show file. Restart Show Control afterwards to use them.')),
+          : 'Changes are saved to the show file. Restart Show Control afterwards to use them.'),
+      h('button', { class: 'always', onclick: () => { S.tab = 'wizard'; S.wiz = null; render(); } }, 'Guided set-up, step by step')),
     h('div', { class: 'card' }, h('h3', {}, 'This computer on the network'),
       nets.length ? h('div', { class: 'kv' }, nets.map(n => [h('b', { class: 'mono' }, n.address), h('span', {}, n.name)]))
         : h('p', { class: 'warnline' }, 'This computer is not connected to a network. Plug it into the show network switch.'),
       h('p', { class: 'hint' }, nets.length
         ? `Every piece of equipment needs its own fixed address that starts the same way as this computer's (${samePart(nets[0])}), each one different, with subnet mask ${nets[0].netmask}.`
         : '')),
-    h('div', { class: 'card form two' }, h('label', {}, 'Show name', h('input', { value: st.name || '', oninput: e => { st.name = e.target.value; edit(); } })),
+    h('div', { class: 'card form two' }, h('label', {}, 'Show name', h('input', { value: st.name || '', oninput: e => { st.name = e.target.value; st.dirty = true; } })),
       h('label', {}, practice ? 'PIN for iPads and phones (used when live)' : 'PIN for iPads and phones', h('input', { inputmode: 'numeric', autocomplete: 'off', value: st.pin || '', placeholder: 'none',
-        oninput: e => { st.pin = e.target.value.trim(); edit(); } }))),
+        oninput: e => { st.pin = e.target.value.trim(); st.dirty = true; } }))),
   );
 
-  // Equipment list
-  const testOne = async d => {
-    st.tests[d.id] = { running: true }; redraw();
-    const r = await ask('setup-test', { device: d });
-    st.tests[d.id] = r.error ? { ok: false, detail: r.error } : r; redraw();
-  };
-  const list = h('div', { class: 'equip' });
-  st.devices.forEach((d, i) => {
-    const k = KINDS[d.type] || { label: d.type, fields: [], help: [] };
-    const t = st.tests[d.id];
-    const fieldEl = ([key, type, label, ph]) => {
-      const val = d[key] ?? '';
-      const set = v => { if (v === '' || v == null) delete d[key]; else d[key] = v; edit(); delete st.tests[d.id]; };
-      let input;
-      if (type.startsWith('select:')) {
-        const opts = type.slice(7).split('|').map(o => o.split('='));
-        input = h('select', { onchange: e => set(e.target.value) }, opts.map(([v, l]) => h('option', { value: v, selected: (val || opts[0][0]) === v }, l)));
-      } else input = h('input', { type: type === 'password' ? 'password' : 'text', inputmode: type === 'port' ? 'numeric' : 'text', autocomplete: 'off', autocapitalize: 'off', value: val, placeholder: ph || '',
-        onchange: e => set(type === 'port' ? (Number(e.target.value) || '') : e.target.value.trim()) });
-      return h('label', {}, label, input);
-    };
-    list.append(h('div', { class: `card dev ${d.enabled === false && !d.host ? 'nohost' : ''}` },
-      h('div', { class: 'devhead' },
-        h('input', { class: 'name', value: d.name || '', 'aria-label': 'Name', oninput: e => { d.name = e.target.value; edit(); } }),
-        h('span', { class: 'kind' }, k.label)),
-      h('div', { class: 'form fields' },
-        h('label', {}, 'Address', h('input', { inputmode: 'decimal', autocomplete: 'off', autocapitalize: 'off', value: d.host || '', placeholder: 'e.g. 10.101.50.20',
-          onchange: e => { d.host = e.target.value.trim(); edit(); delete st.tests[d.id]; redraw(); } })),
-        k.fields.map(fieldEl)),
-      h('div', { class: `result ${t ? (t.running ? 'run' : t.ok ? 'ok' : 'bad') : ''}` },
-        t ? (t.running ? 'Testing… (up to 6 seconds)' : `${t.ok ? '✓' : '✗'} ${t.detail}`) : d.host ? 'Not tested yet' : 'No address yet: this one is left out until it has one.'),
-      h('div', { class: 'tools' },
-        h('button', { class: 'always', disabled: !d.host || t?.running, onclick: () => testOne(d) }, 'Test'),
-        h('button', { class: 'always', onclick: () => { st.help[d.id] = !st.help[d.id]; redraw(); } }, st.help[d.id] ? 'Hide steps' : 'How to set it up'),
-        h('button', { class: 'danger', onclick: () => { if (confirm(`Remove ${d.name}? Cue steps that use it will be skipped.`)) { st.devices.splice(i, 1); edit(); redraw(); } } }, 'Remove')),
-      st.help[d.id] && h('ol', { class: 'steps' }, k.help.map(s => h('li', {}, s)))));
-  });
-  const addSel = h('select', {}, h('option', { value: '' }, 'Add equipment…'), Object.entries(KINDS).map(([t, k]) => h('option', { value: t }, k.label)));
-  addSel.onchange = () => {
-    const t = addSel.value; if (!t) return;
-    const base = KINDS[t].idBase; let n = 1;
-    while (st.devices.some(d => d.id === `${base}${n}`)) n++;
-    const id = `${base}${n}`;
-    st.devices.push({ id, type: t, name: `${KINDS[t].label.split(' (')[0].replace(/^ETC |^Yamaha /, '')} ${n}`, host: '', ...(t === 'panasonic' ? { model: 'pt-dz13k', username: 'admin1' } : t === 'ptz' ? { protocol: 'visca-ip', presets: [] } : {}) });
-    st.help[id] = true; edit(); redraw();
-  };
-  const testable = st.devices.filter(d => d.host);
+  const testable = st.devices.filter(d => d.host || kindFor(st, d).addressOptional);
   wrap.append(h('div', { class: 'row', style: 'justify-content:space-between;align-items:center;margin:14px 0 6px' },
     h('h3', { style: 'margin:0' }, 'Your equipment'),
-    h('button', { class: 'always', style: 'flex:0 0 auto', disabled: !testable.length, onclick: () => testable.forEach(testOne) }, 'Test all')), list, h('div', { class: 'card' }, addSel));
+    h('button', { class: 'always', style: 'flex:0 0 auto', disabled: !testable.length, onclick: () => testable.forEach(d => testOne(st, d)) }, 'Test all')),
+  h('div', { class: 'equip' }, st.devices.map((d, i) => deviceCard(st, d, i))),
+  st.picking ? picker(st, p => { const d = addDevice(st, p); st.help[d.id] = true; st.picking = false; redrawKeepScroll(); })
+    : h('div', { class: 'card row' },
+      h('button', { class: 'primary always', onclick: () => { st.picking = true; redrawKeepScroll(); } }, '+ Add equipment'),
+      h('button', { class: 'always', disabled: st.finding?.running, onclick: () => runDiscover(st) }, 'Find equipment on the network')),
+  foundCard(st), pluginCard(st));
 
   if (st.autostart) {
     wrap.append(h('div', { class: 'card' }, h('h3', {}, 'Always-on show computer'),
@@ -177,27 +295,7 @@ function setupTab() {
           : 'Leave the Show Control folder where it is now.')));
   }
 
-  // Save / go live
-  const save = async action => {
-    const noAddr = st.devices.filter(d => !d.host).map(d => d.name);
-    const failed = st.devices.filter(d => d.host && !st.tests[d.id]?.ok).map(d => d.name);
-    if (action === 'go-live') {
-      if (!st.devices.some(d => d.host)) return toast('Type at least one address first', 4000);
-      const notes = [noAddr.length && `No address yet (left out): ${noAddr.join(', ')}.`, failed.length && `Not tested or didn't answer: ${failed.join(', ')}.`].filter(Boolean);
-      if (!confirm(`${notes.length ? notes.join('\n') + '\n\n' : ''}Go live? Show Control restarts with your real equipment (about 5 seconds). Your cue list comes with you.`)) return;
-    }
-    if (action === 'practice' && !confirm('Back to practice mode? Show Control restarts with pretend equipment. Your equipment list and cue list are kept.')) return;
-    if (action === 'save' && live && !confirm('Save and restart Show Control (about 5 seconds)?')) return;
-    const r = await ask('setup-save', { action, name: st.name, pin: st.pin || '', devices: st.devices });
-    if (r.error) return toast(`Not saved: ${r.error}`, 7000);
-    if (st.pin) localStorage.setItem('pin', st.pin); // this iPad signs straight back in after the restart
-    st.dirty = false;
-    const names = r.missing?.length ? r.missing.map(id => st.devices.find(d => d.id === id)?.name || id) : [];
-    if (names.length) toast(`Saved. Cue steps that use ${names.join(', ')} will be skipped until ${names.length > 1 ? 'they have addresses' : 'it has an address'}.`, 7000);
-    else toast(r.restarting ? 'Saved. Restarting…' : st.mode === 'direct' ? 'Saved. Restart Show Control to use it.' : 'Saved', 4000);
-    if (r.restarting) { st.restarting = true; S.setupRestart = true; }
-    else redraw();
-  };
+  const save = async action => { if (await saveSetupAs(st, action) && !st.restarting) redrawKeepScroll(); };
   wrap.append(h('div', { class: 'sticky-save' },
     h('button', { class: 'always', onclick: () => { if (!st.dirty || confirm('Leave without saving?')) { S.setup = null; S.tab = 'sys'; render(); } } }, 'Back'),
     practice && h('button', { class: 'always', onclick: () => save('save') }, 'Save'),
@@ -214,6 +312,8 @@ function setupCard() {
     h('h3', {}, practice ? 'Practice mode: pretend equipment' : S.mode === 'live' ? 'Live: real equipment' : 'Equipment'),
     h('p', {}, practice ? 'Nothing real is being controlled. When your gear is on the network, set it up here and go live.'
       : 'Addresses and settings for your lighting, sound, QLab, cameras and projectors.'),
-    h('button', { class: practice ? 'primary always' : 'always', onclick: () => { S.setup = null; S.tab = 'setup'; render(); } }, practice ? 'Set up real equipment' : 'Equipment setup'));
+    h('div', { class: 'row' },
+      h('button', { class: practice ? 'primary always' : 'always', onclick: () => { S.setup = null; S.tab = 'setup'; render(); } }, practice ? 'Set up real equipment' : 'Equipment setup'),
+      h('button', { class: 'always', onclick: () => { S.setup = null; S.wiz = null; S.tab = 'wizard'; render(); } }, 'Guided set-up')));
 }
 $('#conn').addEventListener('click', () => { if (S.mode === 'practice') { S.setup = null; S.tab = 'setup'; render(); } });
