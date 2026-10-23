@@ -103,6 +103,16 @@ async function units() {
   assert.ok(html.includes('DSL &lt;special&gt; late') && html.includes('data:image/png;base64,'));
   assert.throws(() => notes.add({ text: '' }), /empty/);
   notes.remove(n.id); assert.strictEqual(notes.list().length, 0);
+
+  // Panasonic PTZ cameras get live video and preset shots like the VISCA ones
+  const drivers = require('../server/drivers'), catalog = require('../server/catalog'), setup = require('../server/setup');
+  const pana = new drivers['panasonic-cam']({ id: 'pcam', type: 'panasonic-cam', name: 'Pana', host: '127.0.0.1', video: 'rtsp://127.0.0.1:554/MediaInput/h264/stream_1' });
+  assert.deepStrictEqual(pana.state.stream, { type: 'live', src: 'pcam' });
+  assert.ok(drivers['panasonic-cam'].meta.fields.some(f => f[1] === 'video'), 'Panasonic set-up has the video address field');
+  assert.strictEqual(catalog.cueCatalog().catalog['panasonic-cam'].preset[0][1], 'preset', 'cue editor picks Panasonic shots by name');
+  assert.strictEqual(setup.cleanDevices([{ id: 'pcam', type: 'panasonic-cam', host: '10.0.0.5', video: ' rtsp://10.0.0.5/MediaInput/h264/stream_1 ' }])[0].video, 'rtsp://10.0.0.5/MediaInput/h264/stream_1');
+  assert.ok(catalog.PROFILES.some(p => p.type === 'camera'), 'video-only cameras are in the Add equipment list');
+  assert.ok(rtsp.PATHS.some(([b, p]) => b === 'Panasonic' && p.includes('MediaInput/h264/stream_1')));
 }
 
 // Whole server against the simulators, with a PIN.
