@@ -213,3 +213,10 @@ button.primary { background: var(--go-d); border-color: var(--go); font-weight: 
 .wizsteps li.on button { background: var(--blue); border-color: var(--blue); color: var(--text); }
 .wizsteps li.done button { color: #7ee2a2; }
 .wizsteps button:disabled { opacity: .5; }
+
+/* Night mode: dim, red-only screen for backstage (no blue or white light spilling into the wings) */
+html.night body { filter: grayscale(1) brightness(.6) contrast(1.15); }
+html.night::after { content: ""; position: fixed; inset: 0; background: #ff2000; mix-blend-mode: multiply; pointer-events: none; z-index: 1000; }
+.nightbtn { min-width: 48px; font-size: 18px; }
+html.night .nightbtn { background: var(--red); border-color: var(--red); }
+.cue-note { background: #3a2c0b; color: #f8d48a; border-radius: 8px; padding: 6px 10px; margin: 4px 0 6px; font-weight: 600; }
