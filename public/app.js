@@ -12,9 +12,18 @@ function h(tag, attrs = {}, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
   return el;
 }
+// el.replaceChildren(...) that skips false/null and flattens lists, like h() does.
+const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(c => c != null && c !== false));
 
 const S = { devices: {}, show: null, log: [], ui: {}, tab: localStorage.getItem('tab') || 'show', clockSkew: 0 };
 const updaters = {}; // device id → [fn(snapshot)]
+// Extension points for the other files (setup.js, health.js, …): extra screens, extra cards on the
+// System tab, and handlers for extra server messages.
+const VIEWS = {};       // tab name → () => element
+const NAV_PARENT = { edit: 'show', setup: 'sys', wizard: 'sys' }; // sub-screens light up their parent tab
+const SYS_CARDS = [];   // () => element, shown on the System tab
+const msgHandlers = {}; // message type → [fn(msg)], called before the built-in handling
+const onMsg = (t, fn) => (msgHandlers[t] ||= []).push(fn);
 const onDevice = (id, fn) => { (updaters[id] ||= []).push(fn); if (S.devices[id]) fn(S.devices[id]); };
 const byType = t => Object.values(S.devices).filter(d => d.type === t);
 
@@ -47,6 +56,7 @@ function setConn(ok) {
 }
 
 function handle(m) {
+  (msgHandlers[m.t] || []).forEach(fn => fn(m)); // first, so other files' state is ready when the screen is drawn
   if (m.t === 'auth-required') { $('#pin').hidden = false; $('#pinInput').focus(); const saved = localStorage.getItem('pin'); if (saved) send({ t: 'auth', pin: saved }); }
   else if (m.t === 'auth-failed') { $('#pinErr').textContent = 'Wrong PIN'; localStorage.removeItem('pin'); $('#pin').hidden = false; }
   else if (m.t === 'init') {
@@ -80,6 +90,15 @@ function handle(m) {
     const bad = m.results.filter(r => !GOOD.includes(r.outcome));
     if (bad.length) toast(bad.map(r => `${r.name.split(' · ')[0]}: ${r.outcome.replace('_', ' ')}${r.detail ? ` (${r.detail})` : ''}`).join('\n'), 6000);
   }
+}
+// Request/reply to the server: resolves with the reply data, or { error } in plain words.
+function ask(t, payload = {}, ms = 20000) {
+  const id = ++cmdSeq;
+  send({ t, id, ...payload });
+  return new Promise(res => {
+    pending[id] = r => res(typeof r === 'string' ? { error: r } : r === true ? {} : r);
+    setTimeout(() => { if (pending[id]) { delete pending[id]; res({ error: 'No answer from Show Control' }); } }, ms);
+  });
 }
 $('#pin form').addEventListener('submit', e => { e.preventDefault(); const pin = $('#pinInput').value; localStorage.setItem('pin', pin); send({ t: 'auth', pin }); });
 
@@ -132,10 +151,11 @@ setInterval(() => { $('#clock').textContent = new Date(Date.now() + S.clockSkew)
 
 function render() {
   for (const k of Object.keys(updaters)) delete updaters[k];
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ({ edit: 'show', setup: 'sys', wizard: 'sys' }[S.tab] || S.tab)));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (NAV_PARENT[S.tab] || S.tab)));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, mics: micsTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab]());
+  const view = VIEWS[S.tab] || ({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, mics: micsTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab] || showTab;
+  main.replaceChildren(view());
 }
 
 // ---------- Show tab ----------
@@ -157,6 +177,14 @@ function warnLine(cue) {
   const off = cueDevices(cue).map(id => S.devices[id]).filter(d => d && d.status !== 'online');
   return off.length ? h('div', { class: 'warnline' }, `⚠ Not connected: ${off.map(d => d.name.split(' · ')[0]).join(', ')}`) : '';
 }
+// Ready dot: green when every piece of equipment the cue uses is answering, red when one isn't.
+function setReadyDot(el, cue) {
+  const ids = cueDevices(cue), off = ids.filter(id => S.devices[id]?.status !== 'online');
+  el.className = `rdot ${!ids.length ? 'none' : off.length ? 'bad' : 'good'}`;
+  el.title = !ids.length ? 'This cue does not control any equipment'
+    : off.length ? `Not ready: ${off.map(id => S.devices[id]?.name.split(' · ')[0] || `${id} (no address)`).join(', ')}` : 'Everything this cue uses is answering';
+  return el;
+}
 
 function showTab() {
   let lastGo = 0;
@@ -176,13 +204,13 @@ function showTab() {
   const update = sh => {
     const next = sh.cues[sh.index];
     go.disabled = !next;
-    stby.replaceChildren(h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
+    fill(stby, h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
       next?.note && h('div', { class: 'cue-note' }, next.note),
       h('div', { class: 'acts' }, next ? (next.actions || []).map(actionText).join(' · ') : ''),
       warn);
     warn.replaceChildren(warnLine(next));
     list.replaceChildren(...sh.cues.map((c, i) => h('div', { class: `cue ${i < sh.index ? 'done' : ''} ${i === sh.index ? 'next' : ''} ${i === sh.lastFired ? 'last' : ''}` },
-      h('div', { class: 'n' }, c.number ?? i + 1),
+      h('div', { class: 'n' }, c.number ?? i + 1, setReadyDot(h('i'), c)),
       h('div', {}, h('div', {}, c.label), h('div', { class: 'tags' }, (c.actions || []).map(actionText).join(' · '))),
       h('div', { class: 'row' }, h('button', { onclick: () => send({ t: 'show', action: 'standby', index: i }) }, 'Stby'),
         h('button', { onclick: () => confirm(`Fire ${c.label} now?`) && send({ t: 'show', action: 'fire', index: i }) }, 'Fire')))));
@@ -191,7 +219,10 @@ function showTab() {
     if (nx) list.scrollTop = Math.max(0, nx.offsetTop - list.offsetTop - 60);
   };
   (updaters.__show ||= []).push(update);
-  (updaters.__anyDevice ||= []).push(() => warn.replaceChildren(warnLine(S.show.cues[S.show.index])));
+  (updaters.__anyDevice ||= []).push(() => {
+    warn.replaceChildren(warnLine(S.show.cues[S.show.index]));
+    list.querySelectorAll('.rdot').forEach((el, i) => setReadyDot(el, S.show.cues[i]));
+  });
   setTimeout(() => update(S.show));
 
   const eos = byType('eos')[0], qlab = byType('qlab')[0];
@@ -665,7 +696,7 @@ function sysTab() {
       screen('/foh.html', 'Front of house', 'House open / closed / hold for the stage manager, calls, lobby message'),
       screen('/lobby.html', 'Lobby TV', 'Big countdown to the start or end of the interval')),
     h('p', { class: 'hint' }, `On another phone or iPad, open ${location.origin} followed by the page name, e.g. ${location.origin}/crew.html`));
-  return h('div', { class: 'grid' }, setupCard(), screens, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
+  return h('div', { class: 'grid' }, setupCard(), SYS_CARDS.map(f => f()), screens, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Log'), log));
 }
 

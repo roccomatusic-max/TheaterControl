@@ -2,6 +2,7 @@
 // Usage: node server/index.js [path/to/show.json]   (default config/show.json)
 const fs = require('fs');
 const path = require('path');
+const { EventEmitter } = require('events');
 const http = require('http');
 const os = require('os');
 const express = require('express');
@@ -67,12 +68,20 @@ micPlan.on('changed', () => queueDevice(micPlan));
 micPlan.on('alert', raiseAlert);
 devices.set(micPlan.id, micPlan);
 
-// ---------- alerts (possible feedback, low mic batteries) ----------
-// Shown on every iPad and phone until someone dismisses them. Same key = same alert, not a new one.
+// ---------- alerts (possible feedback, low mic batteries, equipment that stopped answering, STOP) ----------
+// Shown on every iPad and phone until someone dismisses them (or, for equipment, until it answers
+// again). Same key = same alert, not a new one. features/health.js raises the equipment ones and
+// sends every alert to the phone.
 let alerts = [];
 function raiseAlert(a) {
   alerts = [{ ...a, at: Date.now() }, ...alerts.filter(x => x.key !== a.key)].slice(0, 20);
-  log({ device: a.kind === 'feedback' ? a.device : 'mics', level: 'warn', msg: `${a.title}${a.detail ? ` (${a.detail})` : ''}`, t: Date.now() });
+  log({ device: a.device || 'mics', level: a.level === 'error' ? 'error' : 'warn', msg: `${a.title}${a.detail ? ` (${a.detail})` : ''}`, t: Date.now() });
+  broadcast({ t: 'alerts', alerts });
+  events.emit('alert', alerts[0]);
+}
+function clearAlert(key) {
+  if (!alerts.some(a => a.key === key)) return;
+  alerts = alerts.filter(a => a.key !== key);
   broadcast({ t: 'alerts', alerts });
 }
 
@@ -242,6 +251,7 @@ async function emergencyStop(who) {
     .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
   show.emergency = { at: Date.now(), by: who, results };
   broadcast({ t: 'show', show: showSnapshot() });
+  events.emit('emergency', who, results);
   return results;
 }
 function fireCue(i, source) {
@@ -321,6 +331,25 @@ function saveSetup(m, who) {
   return { restarting, missing };
 }
 
+// ---------- feature modules (server/features) ----------
+// Each module gets this context. It can answer extra WebSocket requests (handlers[type] = async
+// (msg, ws) => reply data), add to the first message a screen gets (initExtras), and add items to
+// the pre-show check (checks). Server-wide settings (alerts, PINs, backups) live in the real show
+// file, so practice and live share them.
+const SETTINGS_PATH = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
+const events = new EventEmitter();
+const ctx = {
+  cfg, devices, show, log, broadcast, raiseAlert, clearAlert, runAction, fireCue, showSnapshot, writeJson, readJson, events,
+  MODE, SAVE_PATH, LIVE_PATH, SUPERVISED, handlers: {}, initExtras: [], checks: [],
+  clients: () => [...wss.clients].filter(c => c.authed && c.readyState === 1),
+  settings: () => readJson(SETTINGS_PATH, null) ?? readJson(SAVE_PATH, cfg),
+  saveSettings(patch) {
+    const cur = readJson(SETTINGS_PATH, null) ?? (MODE === 'practice' ? { live: false } : readJson(SAVE_PATH, cfg));
+    writeJson(SETTINGS_PATH, { ...cur, ...patch });
+  },
+};
+for (const f of ['health']) require(`./features/${f}`)(ctx);
+
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
 function lanAddresses() {
@@ -361,13 +390,13 @@ function broadcast(msg) {
 }
 
 wss.on('connection', (ws, req) => {
-  const who = req.socket.remoteAddress?.replace('::ffff:', '');
+  const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
   ws.authed = !PIN;
-  const hello = () => ws.send(JSON.stringify({
+  const hello = () => ws.send(JSON.stringify(Object.assign({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
     ui: cfg.ui || {}, groups: groups(), mode: MODE, alerts, crew: crew.snapshot(), script: crew.script(),
     firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
-  }));
+  }, ...ctx.initExtras.map(f => f(ws)))));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
 
   ws.on('message', async raw => {
@@ -388,11 +417,11 @@ wss.on('connection', (ws, req) => {
         else if (m.action === 'fire') fireCue(Number(m.index), who);
         else if (m.action === 'standby') { show.index = Math.max(0, Math.min(show.cues.length, Number(m.index))); saveState(); }
         else if (m.action === 'timer') timer(m.timer, m.op);
-        else if (m.action === 'clear-emergency') show.emergency = null;
+        else if (m.action === 'clear-emergency') { show.emergency = null; events.emit('emergency-cleared', who); }
         broadcast({ t: 'show', show: showSnapshot() });
       }
       else if (m.t === 'emergency') await emergencyStop(who);
-      else if (m.t === 'alert-dismiss') { alerts = alerts.filter(a => a.key !== m.key); broadcast({ t: 'alerts', alerts }); }
+      else if (m.t === 'alert-dismiss') clearAlert(m.key);
       else if (m.t === 'save-mics') {
         saveMics(m.mics, who);
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));
@@ -415,6 +444,7 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));
         broadcast({ t: 'show', show: showSnapshot() });
       }
+      else if (ctx.handlers[m.t]) ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await ctx.handlers[m.t](m, ws) }));
     } catch (e) {
       ws.send(JSON.stringify({ t: 'error', id: m.id, msg: e.message }));
       log({ device: m.device || 'core', level: 'error', msg: e.message, t: Date.now() });

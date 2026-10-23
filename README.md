@@ -157,6 +157,23 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 
 <p><img src="docs/screenshots/ipad-mics.png" width="70%" alt="Mics tab on iPad: mic scene, packs with meters and batteries, feedback alert"></p>
 
+## Health, alerts and the pre-show check
+
+- **Pre-show check** (System > Pre-show check): one button tests every piece of equipment, the cue list
+  (standby at the top, timers at zero, cues that use equipment with no address) and this computer
+  (disk space). Each line is green, amber or red, with a one-tap fix where there is an obvious one.
+- **Ready dots**: every cue in the list has a dot that is green when all the equipment it uses is answering.
+- **Alerts**: one alert bar on every screen (with a beep, where the browser allows sound) for equipment
+  that was working and stopped answering for 5 seconds, the emergency stop, possible feedback and low
+  mic batteries (see Sound and mics). Equipment alerts clear when it answers again; several at once
+  become one line. Tap the status dots at the top to see how long each device has been up and how
+  often it dropped out.
+- **Phone alerts**: turn them on in the Health screen and subscribe to the private channel name in the free
+  [ntfy](https://ntfy.sh) app. Equipment drop-outs, the emergency stop, possible feedback, low mic batteries and an
+  unexpected restart of Show Control reach the phone even when the app is closed. Alerts that happen together are sent as
+  one message. The show computer needs internet for this (the control network). Settings are in the
+  show file: `"alerts": { "on": true, "ntfyTopic": "…", "ntfyServer": "https://ntfy.sh" }`.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:
@@ -202,6 +219,7 @@ For recording or streaming the show, OBS on the server can take the same feeds.
 
 ```
 server/index.js          HTTP + WebSocket hub, show cue stack, timers, PIN, log
+server/features/*.js     self-contained features (health, …) that plug into index.js through ctx
 server/drivers/*.js      one driver per device type; each exposes status, state, command()
 server/catalog.js        the "Add equipment" list: makes/models → driver, defaults, set-up steps
 server/discover.js       "Find equipment on the network"
@@ -215,6 +233,10 @@ config/*.json            device list, show cues, UI layout
 Adding a device type means adding one file in `server/drivers/` and one line in `drivers/index.js`
 (or dropping a plugin file in `plugins/`). Adding another brand of something already supported is
 one line in `server/catalog.js`.
+
+Adding a feature means one file in `server/features/` (it gets `ctx`: devices, show, log, broadcast,
+settings, and `handlers` for extra WebSocket requests), plus a script in `public/` that uses the
+extension points at the top of `public/app.js` (`VIEWS`, `SYS_CARDS`, `onMsg`, `ask`).
 
 ## Next ideas
 
