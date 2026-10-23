@@ -40,6 +40,7 @@ const PROFILES = [
   { id: 'x32', label: 'Behringer X32 / Midas M32', category: 'sound', type: 'x32', defaults: { series: 'x32' }, keywords: 'behringer midas m32 x32' },
   { id: 'xair', label: 'Behringer X Air / Midas MR (XR12, XR16, XR18, MR18)', category: 'sound', type: 'x32', defaults: { series: 'xair' }, keywords: 'behringer midas xr18 xair' },
   { id: 'allen-heath', label: 'Allen & Heath SQ, Qu, Avantis, dLive', category: 'sound', type: 'allen-heath', keywords: 'a&h ah sq5 sq6 sq7 qu16 qu24 qu32' },
+  { id: 'shure', label: 'Shure wireless mic receiver (ULX-D, QLX-D, SLX-D, Axient Digital)', category: 'sound', type: 'shure', defaults: { channels: 4 }, keywords: 'radio mic wireless receiver battery' },
   { id: 'wing', label: 'Behringer Wing (through Companion)', category: 'sound', type: 'companion', note: 'through Companion', help: viaCompanion('the Wing', 'Behringer Wing') },
   { id: 'digico', label: 'DiGiCo (through Companion)', category: 'sound', type: 'companion', note: 'through Companion', help: viaCompanion('DiGiCo desks', 'DiGiCo') },
   { id: 'soundcraft', label: 'Soundcraft Si / Vi / Ui (through Companion)', category: 'sound', type: 'companion', note: 'through Companion', help: viaCompanion('Soundcraft desks', 'Soundcraft') },

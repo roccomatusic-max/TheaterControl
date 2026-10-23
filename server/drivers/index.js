@@ -8,6 +8,7 @@ const drivers = {
   ptz: require('./ptz'),
   pjlink: require('./pjlink'),
   panasonic: require('./panasonic'),
+  shure: require('./shure'),
   osc: require('./osc-generic'),
   grandma: require('./grandma'),
   magicq: require('./magicq'),

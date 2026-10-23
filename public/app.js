@@ -53,6 +53,7 @@ function handle(m) {
     $('#pin').hidden = true;
     S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || []; S.crew = m.crew;
     S.mode = m.mode; setConn(true);
+    S.alerts = m.alerts || []; renderAlerts();
     addCueCommands(m.cueCommands);
     // first time in practice mode with no real show yet: start the guided set-up (once per iPad)
     if (m.firstRun && !localStorage.getItem('wizardSeen') && !['wizard', 'setup'].includes(S.tab)) { S.tab = 'wizard'; S.setup = null; }
@@ -67,6 +68,8 @@ function handle(m) {
     (updaters.__anyDevice || []).forEach(fn => fn());
     renderDots();
   } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); renderEmergency(); (updaters.__show || []).forEach(fn => fn(S.show)); }
+  else if (m.t === 'meters') { (S.meters ||= {})[m.device] = m.levels; (updaters.__meters || []).forEach(fn => fn(m.device)); }
+  else if (m.t === 'alerts') { S.alerts = m.alerts; renderAlerts(); }
   else if (m.t === 'crew') S.crew = m.crew;
   else if (m.t === 'saved') { pending[m.id]?.(true); delete pending[m.id]; }
   else if (m.t === 'reply') { pending[m.id]?.(m.data); delete pending[m.id]; }
@@ -84,7 +87,7 @@ function toast(msg, ms = 2500) { const t = $('#toast'); t.textContent = msg; t.c
 
 // ---------- chrome ----------
 function renderDots() {
-  $('#statusDots').replaceChildren(...Object.values(S.devices).map(d => h('div', { class: `dot ${d.status}`, title: `${d.name}: ${d.status}` }, h('i'), h('span', {}, d.name.split(' · ')[0]))));
+  $('#statusDots').replaceChildren(...Object.values(S.devices).filter(d => d.type !== 'mics').map(d => h('div', { class: `dot ${d.status}`, title: `${d.name}: ${d.status}` }, h('i'), h('span', {}, d.name.split(' · ')[0]))));
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; localStorage.setItem('tab', S.tab); render(); }));
 const lockBtn = $('#lockBtn');
@@ -132,7 +135,7 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ({ edit: 'show', setup: 'sys', wizard: 'sys' }[S.tab] || S.tab)));
   renderDots();
   const main = $('#main');
-  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab]());
+  main.replaceChildren(({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, mics: micsTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab]());
 }
 
 // ---------- Show tab ----------
@@ -140,6 +143,7 @@ const fmtDur = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s /
 function actionText(a) {
   const grp = String(a.device).startsWith('group:') && S.groups.find(g => g.id === a.device.slice(6));
   const d = grp ? grp.name : S.devices[a.device]?.name?.split(' · ')[0] || a.device, x = a.args || {};
+  if (ACTION_TEXT[kindOf(a.device)]) return `${ACTION_TEXT[kindOf(a.device)](a)}${a.delay ? ` +${a.delay}s` : ''}`;
   const s = { cue: `Q${x.cue}`, start: `Q${x.cue}`, scene: `scene ${String(x.bank || 'a').toUpperCase()}${x.scene}`, preset: `preset ${x.preset}`, macro: `macro ${x.macro}`,
     shutter: x.closed ? 'shutter close' : 'shutter open', power: x.on ? 'power on' : 'power off', input: `input ${x.input}` }[a.cmd] || a.cmd;
   return `${d} ${s}${a.delay ? ` +${a.delay}s` : ''}`;
@@ -281,7 +285,7 @@ function fader(onMove) {
   return { el, set: p => { if (!dragging) place(p); } };
 }
 
-function strip(devId, kind, idx, getStrip) {
+function strip(devId, kind, idx, getStrip, meter) {
   const nm = h('div', { class: 'nm' }), db = h('div', { class: 'db' });
   const f = fader(p => { const d = posToDb(p); db.textContent = fmtDb(d); cmd(devId, 'level', { strip: kind, index: idx, db: d === -Infinity ? '-inf' : +d.toFixed(2) }); });
   const onBtn = h('button', { onclick: () => { const s = getStrip(S.devices[devId]); cmd(devId, 'on', { strip: kind, index: idx, on: !s.on }); } }, 'ON');
@@ -290,7 +294,7 @@ function strip(devId, kind, idx, getStrip) {
     nm.textContent = s.name; const v = rawToDb(s.level); db.textContent = fmtDb(v); f.set(dbToPos(v));
     onBtn.textContent = s.on ? 'ON' : 'OFF'; onBtn.className = s.on ? 'on' : 'muted';
   });
-  return h('div', { class: 'strip' }, nm, onBtn, f.el, db);
+  return h('div', { class: 'strip' }, nm, onBtn, meter ? h('div', { class: 'fm' }, f.el, meter) : f.el, db);
 }
 
 function sndTab() {
@@ -310,7 +314,7 @@ function sndTab() {
     out.append(
       h('div', { class: 'card' }, h('h3', {}, `${tf.name} · DCAs`, statusPill(tf.id)),
         h('div', { class: 'strips' }, dcas.map(i => strip(tf.id, 'dca', i, d => d.state.dcas[i])), strip(tf.id, 'master', 0, d => ({ ...d.state.master, name: 'ST' })))),
-      h('div', { class: 'card' }, h('h3', {}, `${tf.name} · Inputs`), h('div', { class: 'strips' }, chans.map(i => strip(tf.id, 'ch', i, d => d.state.channels[i])))),
+      h('div', { class: 'card' }, h('h3', {}, `${tf.name} · Inputs`, meterNote(tf.id)), h('div', { class: 'strips' }, chans.map(i => strip(tf.id, 'ch', i, d => d.state.channels[i], meterBar(tf.id, i))))),
       h('div', { class: 'card' }, h('h3', {}, 'Scene recall', last),
         h('div', { class: 'row', style: 'align-items:center' }, sceneIn,
           h('button', { onclick: () => sceneIn.value && confirm(`Recall scene A${sceneIn.value} on ${tf.name}?`) && cmd(tf.id, 'scene', { bank: 'a', scene: Number(sceneIn.value) }) }, 'Recall A'),
@@ -429,6 +433,8 @@ const CMD_LABEL = { cue: 'Fire cue', go: 'GO', back: 'Back', macro: 'Fire macro'
   start: 'Start cue', stop: 'Stop all', panic: 'Panic (fade out all)', pause: 'Pause all', resume: 'Resume all', playhead: 'Move playhead to',
   scene: 'Recall scene', level: 'Set fader', on: 'Fader on/off', preset: 'Go to preset', home: 'Home', tally: 'Tally light',
   shutter: 'Shutter', power: 'Power', input: 'Input', send: 'Send OSC' };
+// Filled in by other screens (mics.js): dropdown choices for 'pick:<name>' fields, and how a kind of device's cue steps read.
+const PICKERS = {}, ACTION_TEXT = {};
 // Commands the server describes (newer drivers, plugins, brands with ready-made commands) are added to the list above.
 function addCueCommands(cc) {
   if (!cc) return;
@@ -441,7 +447,7 @@ const kindOf = id => {
   const d = S.devices[id];
   return d?.profile && CATALOG[d.profile] ? d.profile : d?.type;
 };
-const cmdLabel = (kind, c) => CMD_LABEL[`${kind}:${c}`] || CMD_LABEL[c] || c;
+const cmdLabel = (kind, c) => CMD_LABEL[`${kind}:${c}`] || CMD_LABEL[`${kind}.${c}`] || CMD_LABEL[c] || c;
 const targets = () => [
   ...Object.values(S.devices).map(d => ({ id: d.id, label: d.name })),
   ...S.groups.map(g => ({ id: `group:${g.id}`, label: `Projectors: ${g.name}` })),
@@ -467,6 +473,7 @@ function field(a, [key, type, def, label], onChange) {
     input = opts.length ? h('select', { onchange: e => set(e.target.value) }, h('option', { value: '' }, 'Choose…'), opts.map(i => h('option', { value: i.code, selected: i.code === val }, i.label)))
       : h('input', { value: val, placeholder: 'e.g. HD1 or 31', onchange: e => set(e.target.value.trim()) });
   }
+  else if (type.startsWith('pick:')) input = h('select', { onchange: e => set(e.target.value) }, h('option', { value: '' }, 'Choose…'), PICKERS[type.slice(5)](a).map(o => h('option', { value: o.value, selected: String(o.value) === String(val) }, o.label)));
   else input = h('input', { inputmode: type === 'number' ? 'decimal' : 'text', value: val, onchange: e => set(type === 'number' ? Number(e.target.value) : e.target.value) });
   return h('label', {}, label, input);
 }
@@ -649,7 +656,7 @@ function sysTab() {
   log.append(...S.log.map(line));
   (updaters.__log ||= []).push(e => { const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20; log.append(line(e)); if (atBottom) log.scrollTop = log.scrollHeight; });
   setTimeout(() => (log.scrollTop = log.scrollHeight));
-  const devs = h('div', { class: 'kv' }, Object.values(S.devices).map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
+  const devs = h('div', { class: 'kv' }, Object.values(S.devices).filter(d => d.type !== 'mics').map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
   const screen = (href, name, what) => h('div', {}, h('a', { href, target: '_blank', style: 'color:#9cc4ff;font-weight:600' }, name), h('div', { class: 'dim', style: 'font-size:13px' }, what));
   const screens = h('div', { class: 'card' }, h('h3', {}, 'Stage manager and crew screens'),
     h('div', { style: 'display:grid;gap:10px' },

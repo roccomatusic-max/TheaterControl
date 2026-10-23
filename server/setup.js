@@ -126,6 +126,7 @@ function describe(dc, d) {
     case 'yamaha-tf': return 'Connected to the mixer.';
     case 'qlab': return `QLab answered${s.playheadName ? `, playhead on "${s.playheadName}"` : ''}.`;
     case 'ptz': return 'The camera answered.';
+    case 'shure': { const linked = (s.channels || []).filter(c => c.tx).length; return `The receiver answered${linked ? `: ${linked} pack${linked > 1 ? 's' : ''} switched on` : ''}.`; }
     case 'panasonic': case 'pjlink': return `The projector answered${s.power ? `: ${s.power}` : ''}${s.info?.name ? ` (${s.info.name})` : ''}.`;
     case 'x32': return `Connected to the mixer${s.model ? ` (${s.model})` : ''}.`;
     case 'panasonic-cam': return `The camera answered${s.power != null ? `: ${s.power ? 'on' : 'standby'}` : ''}.`;

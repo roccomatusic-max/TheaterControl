@@ -51,6 +51,16 @@ const KINDS = {
       'The username and password are the ones for the projector\'s web page (often admin1 / panasonic from the factory). Type them in the boxes and tap Test.',
     ],
   },
+  shure: {
+    label: 'Shure wireless mic receiver (ULX-D, QLX-D, SLX-D, Axient Digital)', idBase: 'rx',
+    fields: [['channels', 'select:4=4 channels (quad)|2=2 channels (dual)|1=1 channel', 'Channels']],
+    help: [
+      'Plug the receiver\'s network port into the show network switch.',
+      'On the receiver\'s front panel open Menu > Network (Advanced Settings on some models). Set IP Mode to Manual and give it a fixed address, for example 10.101.50.31, mask 255.255.0.0. Each receiver needs its own address.',
+      'Nothing else to turn on: Show Control uses the same connection as Shure Wireless Workbench. Type the address in the Address box and tap Test.',
+      'Then open Mics > Edit packs & scenes and pick this receiver and its channel for each pack, to see battery and signal.',
+    ],
+  },
   pjlink: {
     label: 'Projector, any brand (PJLink)', idBase: 'proj', fields: [['password', 'password', 'PJLink password (only if it has one)', '']],
     help: [

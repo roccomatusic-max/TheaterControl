@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "sim": "node sim/run.js",
-    "test": "node test/smoke.js && node test/projection.js && node test/safety.js && node test/setup.js && node test/crew.js && node test/compat.js",
+    "test": "node test/smoke.js && node test/projection.js && node test/safety.js && node test/setup.js && node test/crew.js && node test/sound.js && node test/compat.js",
     "package": "node scripts/package.js"
   },
   "license": "UNLICENSED",

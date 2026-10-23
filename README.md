@@ -11,6 +11,7 @@ and used from an iPad or phone in a browser. It works with no internet.
 | PTZ cameras | VISCA-over-IP (UDP 52381) or raw VISCA TCP (5678) | Joystick pan/tilt, zoom, focus, presets (tap = recall, hold = store), tally, home, power |
 | Camera video | go2rtc / MediaMTX → WebRTC, or MJPEG/HLS | Live view on the iPad, low latency |
 | Panasonic projectors (PT-DZ13K, PT-DZ770 series) | Panasonic LAN protocol, TCP 1024 (+ PJLink for health) | Power with confirmation, shutter, inputs, lamp hours, fan/lamp/temperature health, lens home |
+| Shure ULX-D, QLX-D, SLX-D, Axient Digital receivers | Shure text protocol, TCP 2202 | Pack battery (bars + time left), signal, whether a pack is switched on |
 | Any PJLink projector / display | PJLink class 1, TCP 4352 | Power, shutter, inputs, lamp hours, health, make/model |
 | grandMA2 / grandMA3 | Telnet (MA2) / OSC (MA3) command line | GO, go to cue, back, off, macros, any command line |
 | ChamSys MagicQ | OSC over UDP | Playback GO, stop, release, jump to cue, level |
@@ -135,6 +136,26 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 - Use a dedicated 5 GHz access point for the control network with a hidden SSID and WPA2/3. Don't share it with the house or cast Wi-Fi.
 - Turn off automatic OS updates and sleep on the server during the run.
 - If the TF5 carries Dante, keep Dante on its own network or VLAN.
+
+## Sound and mics
+
+- **Level meters**: the Sound tab shows a live meter beside every input fader. They come from the TF5 at
+  10 updates a second. (The meter request, `mtrstart MIXER:Current/Meter/InCh 100`, still has to be checked on the
+  real desk. If the desk refuses it, the app says "meters not available" and everything else carries on.
+  `"meterPath"` and `"meterMs"` on the mixer override it.)
+- **Feedback alert**: a channel that holds a steady tone above -12 dB for a second raises a red alert on every
+  iPad and phone, with a one-tap mute for that channel. Singing moves around too much to trip it, but a long
+  held note into a hot mic can. Tune or turn it off with `"sound": { "feedback": { "enabled": true, "minDb": -12, "holdMs": 1000, "steadyDb": 3 } }`.
+- **Mics tab: mic plot**: every radio mic pack with who wears it, its mixer channel (live/off), meter, battery
+  and signal. Scenes say which packs are live (and who wears a pack when a cover or swap has it). Tapping a scene,
+  or a show cue with "Switch mics to scene", turns each pack's channel on or off on the TF5 to match. A low pack
+  battery raises an alert naming the actor.
+- **Mic check**: steps through the packs one at a time with a big meter. It ticks "heard on the desk" by itself
+  when the mic comes through, and you mark each one Good or Problem.
+- Packs and scenes are edited on the iPad (Mics → Edit packs & scenes) and saved in the show file under `"mics"`.
+  Receivers are added on System → Equipment setup.
+
+<p><img src="docs/screenshots/ipad-mics.png" width="70%" alt="Mics tab on iPad: mic scene, packs with meters and batteries, feedback alert"></p>
 
 ## Projection
 
