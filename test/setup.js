@@ -102,7 +102,7 @@ async function connect(expectMode, pin) {
     // Back to practice: cue list goes back too.
     r = await c.ask({ t: 'setup-save', action: 'practice', name: 'Into the Woods', pin: '2468', devices: devs });
     c.ws.close();
-    c = await connect('practice');
+    c = await connect('practice', '2468'); // the PINs apply in practice too
     assert.equal(JSON.parse(fs.readFileSync(live, 'utf8')).live, false);
     assert.ok(JSON.parse(fs.readFileSync(practice, 'utf8')).show.cues.length > 5, 'practice copy has the cue list');
     info = await c.ask({ t: 'setup-get' });

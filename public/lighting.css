@@ -1,0 +1,30 @@
+/* House lights, the console's cue list, channel check */
+.housenow { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.houselooks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.houselooks button { padding: 8px 4px; font-size: 18px; min-width: 0; }
+.houselooks button small { display: block; font-size: 12px; font-weight: 500; color: var(--dim); }
+.houselevels { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.form label.check { text-transform: none; font-size: inherit; color: inherit; letter-spacing: 0; display: flex; }
+.eoslist { display: flex; flex-direction: column; gap: 3px; max-height: 420px; overflow-y: auto; position: relative; margin-top: 8px; }
+.eoslist > * { flex-shrink: 0; }
+.eoscue { display: grid; grid-template-columns: 48px 1fr auto auto; gap: 8px; align-items: center; text-align: left; min-height: 40px; padding: 6px 10px;
+  background: var(--panel2); border: 1px solid transparent; border-radius: 8px; font-size: 14px; font-weight: 400; }
+.eoscue b { font-variant-numeric: tabular-nums; }
+.eoscue .lbl small { display: block; color: var(--dim); font-size: 12px; }
+.eoscue .tm { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.eoscue .inshow { font-size: 11px; color: var(--blue); white-space: nowrap; }
+.eoscue.live { border-color: var(--go); background: color-mix(in srgb, var(--go) 16%, var(--panel2)); }
+.eoscue.pend { border-color: var(--stby); }
+.eosscene { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 8px 0 2px; }
+.eospick { display: grid; gap: 2px; max-height: 45vh; overflow-y: auto; }
+.cc-now { display: grid; gap: 10px; }
+.cc-top { display: flex; justify-content: space-between; color: var(--dim); font-size: 14px; }
+.cc-n { font-size: 56px; font-weight: 900; text-align: center; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.cc-label { text-align: center; color: var(--dim); }
+.cc-bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.cc-bar i { display: block; height: 100%; background: var(--blue); }
+button.cc-ok { background: var(--go-d); border-color: var(--go); }
+button.cc-bad { border-color: var(--red); }
+.reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cc-now .good { color: #7ee2a2; } .cc-now .bad, .card p.bad { color: #ffb4b6; }
+@media (max-width: 600px) { .houselooks { grid-template-columns: 1fr 1fr; } .eoscue { grid-template-columns: 40px 1fr auto; } .eoscue > :last-child { display: none; } }

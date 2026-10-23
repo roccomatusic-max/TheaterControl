@@ -20,6 +20,7 @@ const drivers = {
   applemidi: require('./applemidi'),
   text: require('./text'),
   http: require('./http'),
+  pretend: require('./pretend'), // training mode only; not offered on the Setup screen (no meta)
 };
 
 const plugins = require('../plugins').load(drivers);

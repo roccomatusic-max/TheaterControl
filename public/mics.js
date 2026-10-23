@@ -24,20 +24,7 @@ function meterNote(devId) {
   return n;
 }
 
-// ----- alerts bar: possible feedback, low batteries. Shown on every screen until dismissed. -----
-const seenAlerts = new Set();
-function renderAlerts() {
-  const bar = $('#alertBar'), list = S.alerts || [];
-  if (list.some(a => !seenAlerts.has(`${a.key}@${a.at}`))) navigator.vibrate?.([200, 100, 200]);
-  list.forEach(a => seenAlerts.add(`${a.key}@${a.at}`));
-  bar.hidden = !list.length;
-  const dismiss = a => send({ t: 'alert-dismiss', key: a.key });
-  bar.replaceChildren(...list.slice(0, 3).map(a => h('div', { class: `alert ${a.kind}` },
-    h('b', {}, a.title), h('span', {}, `${a.detail || ''} · ${new Date(a.at).toLocaleTimeString([], { hour12: false })}`),
-    a.action && h('button', { class: 'danger always', onclick: () => { cmd(a.action.device, a.action.cmd, a.action.args); dismiss(a); } }, a.action.label),
-    h('button', { class: 'always', onclick: () => dismiss(a) }, 'Dismiss'))),
-  list.length > 3 ? h('div', { class: 'dim' }, `and ${list.length - 3} more`) : '');
-}
+// The alert bar (possible feedback, low batteries and the rest) is in health.js.
 
 // ----- shared bits -----
 const micPlan = () => S.devices.mics?.state || { packs: [], scenes: [], status: {} };
