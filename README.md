@@ -23,6 +23,21 @@ pocketed phone can't fire anything, and an optional PIN.
   <img src="docs/screenshots/ipad-cam.png" width="49%" alt="Camera tab on iPad">
 </p>
 
+## Stage manager and crew screens
+
+Other people in the company open their own page on a phone, iPad or TV (same address, different page):
+
+| Page | For | What it does |
+|---|---|---|
+| `/sm.html` | Stage manager | Big standby cue and GO, cue notes, which crew are standing by, show/act timers. Side panels: calls, rehearsal notes (tagged with the cue and show time, export to a spreadsheet), script with cue places that follows the show, show night checklist with sign-off, crew cue lights, countdown and lobby message |
+| `/crew.html` | Crew phones | Pick your job once. Your own run sheet, a cue light that turns amber at standby (tap "Standing by") and green at GO, and calls like "Five minutes please" with a Got it button |
+| `/foh.html` | Front of house manager | House not open / open / hold / closed / interval, seen instantly by the stage manager; calls; lobby message |
+| `/lobby.html` | Lobby TV | The show name and a big countdown to the start or the end of the interval |
+
+Crew roles, the checklist and the script are saved in the show file under `"crew"`; give a cue crew tasks in
+Show → Edit cues. Notes, ticks and calls are kept across a restart. The 🌙 button on every screen switches
+that device to a dim, red-only night mode for backstage.
+
 ## Easiest way to try it (Mac or Windows, nothing to install)
 
 1. Go to [Releases](https://github.com/roccomatusic-max/TheaterControl/releases) and download

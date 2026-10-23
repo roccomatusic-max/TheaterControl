@@ -1,0 +1,75 @@
+/* Stage manager, crew, front of house and lobby screens (on top of app.css) */
+.page { flex: 1; overflow: auto; padding: var(--gap); -webkit-overflow-scrolling: touch; }
+.sm { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .sm { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); height: 100%; } .sm > * { min-height: 0; overflow: auto; } }
+.callcol { display: flex; flex-direction: column; gap: var(--gap); }
+.bigstby { background: var(--panel); border: 3px solid var(--stby); border-radius: var(--r); padding: 14px 16px; }
+.bigstby small { color: var(--stby); font-weight: 800; letter-spacing: .1em; }
+.bigstby .num { font-size: 64px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+.bigstby .lbl { font-size: 28px; font-weight: 700; margin: 4px 0 8px; }
+.bigstby .acts { color: var(--dim); font-size: 13px; }
+#smGo { background: var(--go); border: 0; color: #04140a; font-size: 64px; font-weight: 900; border-radius: var(--r); min-height: 160px; box-shadow: 0 5px 0 var(--go-d); width: 100%; }
+#smGo:disabled { background: #24412f; color: #5c7a66; box-shadow: none; }
+.needs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.need { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: #3a2c0b; color: #f8d48a; }
+.need.ack { background: #0f3a20; color: #7ee2a2; }
+.lastfired { color: var(--dim); font-size: 14px; }
+.tmini { display: flex; gap: var(--gap); flex-wrap: wrap; }
+.tmini .card { flex: 1; min-width: 150px; }
+.tmini .t { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ptabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: var(--gap); }
+.ptabs button { flex: 1 1 auto; min-height: 40px; padding: 6px 10px; font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { min-height: 36px; padding: 4px 12px; font-size: 13px; }
+textarea { font: inherit; font-size: 16px; color: var(--text); background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; width: 100%; min-height: 90px; resize: vertical; }
+.items { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.item { background: var(--panel2); border-radius: 10px; padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+.item .meta { font-size: 12px; color: var(--dim); }
+.item button { min-height: 36px; padding: 4px 10px; font-size: 13px; }
+.tick { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 6px 10px; min-height: 52px; }
+.tick button { min-height: 40px; width: 44px; padding: 0; font-size: 20px; }
+.tick.on button { background: var(--go-d); border-color: var(--go); }
+.tick.on .tx { color: var(--dim); }
+.progress { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.progress i { display: block; height: 100%; background: var(--go); }
+.script { font: 16px/1.55 Georgia, "Times New Roman", serif; white-space: pre-wrap; max-height: 70vh; overflow: auto; background: #101318; border-radius: 10px; padding: 8px 0; position: relative; }
+.script .ln { padding: 1px 12px 1px 64px; position: relative; min-height: 1.4em; }
+.script .ln.placing:active { background: #1d2a3d; }
+.script .mk { position: absolute; left: 6px; font: 700 12px/1.6 -apple-system, sans-serif; color: #04140a; background: var(--stby); border-radius: 6px; padding: 0 6px; }
+.script .ln.stby { background: #3a2c0b; }
+.script .ln.stby .mk { background: var(--go); }
+.big-label { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin: 12px 0 6px; }
+.links { display: grid; gap: 6px; }
+.links a { color: #9cc4ff; }
+
+/* Crew phone: cue light + run sheet */
+.light { border-radius: 18px; padding: 22px 18px; text-align: center; background: var(--panel); border: 2px solid var(--line); }
+.light small { font-weight: 800; letter-spacing: .12em; font-size: 15px; }
+.light .big { font-size: 46px; font-weight: 900; margin: 6px 0; min-height: 0; }
+.light .task { font-size: 22px; font-weight: 600; }
+.light.standby { background: #4a3608; border-color: var(--stby); color: #fff3cf; animation: pulse 1.6s ease-in-out infinite; }
+.light.standby.acked { animation: none; }
+.light.go { background: var(--go); border-color: var(--go); color: #04140a; }
+@keyframes pulse { 50% { background: #2a1f05; } }
+.light button { margin-top: 14px; width: 100%; }
+.sheet .item.done { opacity: .45; } .sheet .item.next { outline: 2px solid var(--stby); }
+.roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.roles button { min-height: 64px; font-size: 17px; font-weight: 600; }
+.callov { position: fixed; inset: 0; z-index: 30; background: #000e; display: grid; place-items: center; padding: 20px; }
+.callov > div { background: var(--panel); border: 3px solid var(--blue); border-radius: 18px; padding: 24px; text-align: center; width: min(520px, 100%); display: grid; gap: 14px; }
+.callov small { color: var(--dim); letter-spacing: .08em; }
+.callov .ct { font-size: 38px; font-weight: 900; }
+
+/* Front of house */
+.fohbtns { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.fohbtns button { min-height: 72px; font-size: 18px; font-weight: 700; }
+.fohbtns button.cur { background: var(--go-d); border-color: var(--go); }
+
+/* Lobby screen: huge, readable from across a foyer */
+body.lobby { cursor: none; }
+.lobbyview { flex: 1; display: grid; place-items: center; text-align: center; padding: 4vw; }
+.lobbyview .sn { font-size: 6vw; font-weight: 800; }
+.lobbyview .cl { font-size: 3.2vw; color: var(--dim); margin-top: 2vw; }
+.lobbyview .cd { font-size: 17vw; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+.lobbyview .msg { font-size: 3.6vw; margin-top: 3vw; color: #f8d48a; }
+.lobbyview .tod { position: fixed; right: 2vw; bottom: 2vw; font-size: 2.4vw; color: var(--dim); font-variant-numeric: tabular-nums; }
