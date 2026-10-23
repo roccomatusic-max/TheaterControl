@@ -10,6 +10,10 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const drivers = require('./drivers');
 const setup = require('./setup');
+const catalog = require('./catalog');
+const discover = require('./discover');
+const { MicPlan, validateMics } = require('./mics');
+const FeedbackWatch = require('./feedback');
 const createCrew = require('./crew');
 
 const cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.join(__dirname, '../config/show.json'));
@@ -27,6 +31,16 @@ const LIVE_PATH = process.env.SHOW_LIVE_PATH || cfgPath;
 const SUPERVISED = !!process.env.SHOW_SUPERVISED; // the launcher restarts us when we exit with RESTART
 const RESTART = 75;
 
+// Practice mode keeps a copy of the practice show in the user's folder. Equipment added to the
+// practice gear in a later version (e.g. the radio mic receivers) is added to that copy here.
+if (MODE === 'practice' && process.env.SHOW_SIM_CONFIG) {
+  try {
+    const sim = JSON.parse(fs.readFileSync(process.env.SHOW_SIM_CONFIG, 'utf8'));
+    for (const d of sim.devices || []) if (!cfg.devices.some(x => x.id === d.id)) cfg.devices.push(d);
+    for (const k of ['mics', 'sound']) if (!cfg[k] && sim[k]) cfg[k] = sim[k];
+  } catch { /* no practice show to merge */ }
+}
+
 // ---------- devices ----------
 const logRing = [];
 const devices = new Map();
@@ -39,10 +53,52 @@ for (const dc of cfg.devices) {
   if (dc.enabled === false) continue;
   const D = drivers[dc.type];
   if (!D) { console.warn(`unknown device type ${dc.type}`); continue; }
-  const d = new D(dc);
+  // ready-made commands of the brand picked on the Setup screen, plus any written into show.json
+  const templates = { ...(catalog.templatesFor(dc.profile) || {}), ...(dc.templates || {}) };
+  const d = new D(Object.keys(templates).length ? { ...dc, templates } : dc);
   d.on('log', log);
-  d.on('changed', () => queueDevice(d));
+  d.on('changed', () => { queueDevice(d); micPlan?.refresh(); });
+  d.on('meters', onMeters);
   devices.set(d.id, d);
+}
+// The mic plot is a device too, so cues can switch the mics for a scene ("device": "mics").
+const micPlan = new MicPlan(cfg.mics, devices);
+micPlan.on('log', log);
+micPlan.on('changed', () => queueDevice(micPlan));
+micPlan.on('alert', raiseAlert);
+devices.set(micPlan.id, micPlan);
+
+// ---------- alerts (possible feedback, low mic batteries, equipment that stopped answering, STOP) ----------
+// Shown on every iPad and phone until someone dismisses them (or, for equipment, until it answers
+// again). Same key = same alert, not a new one. features/health.js raises the equipment ones and
+// sends every alert to the phone.
+let alerts = [];
+function raiseAlert(a) {
+  alerts = [{ ...a, at: Date.now() }, ...alerts.filter(x => x.key !== a.key)].slice(0, 20);
+  log({ device: a.device || 'mics', level: a.level === 'error' ? 'error' : 'warn', msg: `${a.title}${a.detail ? ` (${a.detail})` : ''}`, t: Date.now() });
+  broadcast({ t: 'alerts', alerts });
+  events.emit('alert', alerts[0]);
+}
+function clearAlert(key) {
+  if (!alerts.some(a => a.key === key)) return;
+  alerts = alerts.filter(a => a.key !== key);
+  broadcast({ t: 'alerts', alerts });
+}
+
+// Mixer input meters: sent to the iPads at most 10 times a second, and watched for feedback.
+const fbCfg = cfg.sound?.feedback || {};
+const feedback = fbCfg.enabled === false ? null : new FeedbackWatch(fbCfg);
+const meterSent = new Map();
+function onMeters(d) {
+  const now = Date.now();
+  if (now - (meterSent.get(d.id) || 0) >= 100) { meterSent.set(d.id, now); broadcast({ t: 'meters', device: d.id, levels: d.levels }); }
+  for (const hit of feedback?.push(d.id, d.levels, now) || []) {
+    const name = d.state.channels[hit.channel]?.name || `CH${hit.channel + 1}`;
+    const pack = micPlan.plan.packs.find(p => p.channel === hit.channel && micPlan.mixerFor(p) === d);
+    const who = pack && micPlan.wearer(pack);
+    raiseAlert({ key: `fb:${d.id}:${hit.channel}`, kind: 'feedback', device: d.id, title: `Possible feedback on ${name}${who ? ` (${who})` : ''}`,
+      detail: `steady tone at ${hit.db.toFixed(0)} dB on channel ${hit.channel + 1}`, action: { label: `Mute ${name}`, device: d.id, cmd: 'on', args: { strip: 'ch', index: hit.channel, on: false } } });
+  }
 }
 
 // Coalesce state pushes (TF sync and VISCA polls can be chatty) to ≤ 20/s per device.
@@ -80,7 +136,7 @@ async function runAction(a, source) {
   // Group commands go out concurrently; each projector reports its own outcome.
   return Promise.all(targets.map(async d => {
     let r;
-    try { r = (await d.command(a.cmd, a.args || {})) || { outcome: 'sent' }; }
+    try { r = await d.command(a.cmd, a.args || {}); if (!r || typeof r !== 'object') r = { outcome: 'sent' }; }
     catch (e) { r = { outcome: 'not_sent', detail: e.message }; }
     if (a.cmd !== 'move' && a.cmd !== 'zoom') {
       log({ device: d.id, level: LEVEL[r.outcome] || 'error', msg: `${a.cmd} ${JSON.stringify(a.args || {})} → ${r.outcome}${r.detail ? `: ${r.detail}` : ''} (${source})`, t: Date.now() });
@@ -167,6 +223,19 @@ function saveCues(cues, who, note) {
   events.emit('cues-saved', { before, cues: clean, who, note });
 }
 
+// Mic plot edits from the iPad: validated, backed up, saved to the show file, used at once.
+function saveMics(m, who) {
+  const clean = validateMics(m, id => devices.has(id) || cfg.devices.some(d => d.id === id));
+  let onDisk = cfg;
+  try { onDisk = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf8')); } catch { /* first save of a practice copy */ }
+  if (fs.existsSync(SAVE_PATH)) fs.copyFileSync(SAVE_PATH, `${SAVE_PATH}.bak`);
+  // a practice copy also keeps the practice gear the mic plot points at
+  writeJson(SAVE_PATH, { ...onDisk, ...(MODE === 'practice' ? { devices: cfg.devices } : {}), mics: clean });
+  cfg.mics = clean;
+  micPlan.load(clean);
+  log({ device: 'mics', level: 'cmd', msg: `mic plot saved (${clean.packs.length} packs, ${clean.scenes.length} scenes) by ${who}`, t: Date.now() });
+}
+
 // Emergency stop: everything that makes noise, light or movement, all at once.
 // Default: QLab panic, close every projector shutter, stop every PTZ camera. Add more in
 // config "safety": { "emergency": [ { "device": "eos", "cmd": "macro", "args": { "macro": 999 } } ] }
@@ -174,12 +243,12 @@ async function emergencyStop(who) {
   const actions = [
     ...[...devices.values()].filter(d => d.type === 'qlab').map(d => ({ device: d.id, cmd: 'panic' })),
     ...(projectors().length ? [{ device: 'group:all', cmd: 'shutter', args: { closed: true } }] : []),
-    ...[...devices.values()].filter(d => d.type === 'ptz').flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
+    ...[...devices.values()].filter(d => d.type === 'ptz' || d.type === 'panasonic-cam').flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
     ...(cfg.safety?.emergency || []),
   ];
   log({ device: 'show', level: 'error', msg: `EMERGENCY STOP by ${who}`, t: Date.now() });
   const results = (await Promise.all(actions.map(a => runAction(a, `EMERGENCY ${who}`).catch(e => [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }])))).flat()
-    .filter(r => !(r.outcome === 'sent' && devices.get(r.device)?.type === 'ptz'))
+    .filter(r => !(['sent', 'ok'].includes(r.outcome) && ['ptz', 'panasonic-cam'].includes(devices.get(r.device)?.type)))
     // a projector in standby is already dark, so a refused shutter-close there is not a problem
     .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
   show.emergency = { at: Date.now(), by: who, results };
@@ -218,8 +287,13 @@ function setupInfo() {
   if (SUPERVISED) try { autostart = require('../launcher/autostart').status(); } catch { /* not available on this system */ }
   const pin = (MODE === 'practice' ? live?.server?.pin : readJson(SAVE_PATH, cfg).server?.pin) || '';
   return { mode: MODE, name: (MODE === 'practice' ? live?.show?.name : show.name) || show.name.replace(/^Simulated /, ''), pin: String(pin), devices: list,
-    networks: setup.localNetworks(), autostart, supervised: SUPERVISED };
+    networks: setup.localNetworks(), autostart, supervised: SUPERVISED, firstRun: firstRun(),
+    // the "Add equipment" list, and what each kind needs to be set up
+    categories: catalog.CATEGORIES, profiles: catalog.profiles(), types: catalog.typeInfo(),
+    plugins: { ...drivers.plugins, folders: require('./plugins').dirs() } };
 }
+// Practice mode and no real show file yet: the iPad offers the guided set-up.
+const firstRun = () => MODE === 'practice' && !fs.existsSync(LIVE_PATH);
 // Saves the equipment list. action: "save" (stay in this mode), "go-live", or "practice".
 // The cue list goes with you: practice cues are copied into the real show when going live, and back.
 function saveSetup(m, who) {
@@ -233,6 +307,7 @@ function saveSetup(m, who) {
   } else if (MODE === 'practice') {
     const live = readJson(LIVE_PATH, {}), practice = readJson(SAVE_PATH, cfg);
     out = { ...live, ...practice, server: live.server || practice.server, devices: list, live: m.action === 'go-live' };
+    if (!out.mics && cfg.mics) out.mics = cfg.mics; // the mic plot comes with you, like the cue list
     out.show = { ...(practice.show || {}), name };
   } else {
     const live = readJson(LIVE_PATH, cfg);
@@ -251,7 +326,7 @@ function saveSetup(m, who) {
   writeJson(file, out);
   // Steps in cues that point at equipment that's gone or has no address are skipped at GO; say so now.
   const missing = [...new Set((out.show?.cues || []).flatMap(c => (c.actions || []).map(a => a.device))
-    .filter(id => !id.startsWith('group:') && !ids.has(id)))];
+    .filter(id => !id.startsWith('group:') && id !== 'mics' && !ids.has(id)))];
   const restarting = SUPERVISED && (m.action !== 'save' || MODE !== 'practice');
   log({ device: 'core', level: 'cmd', msg: `equipment setup saved (${m.action}) by ${who}${restarting ? ', restarting' : ''}`, t: Date.now() });
   if (restarting) setTimeout(() => { for (const d of devices.values()) d.stop(); process.exit(RESTART); }, 500);
@@ -266,7 +341,7 @@ function saveSetup(m, who) {
 const SETTINGS_PATH = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
 const events = new EventEmitter();
 const ctx = {
-  cfg, devices, show, log, broadcast, runAction, fireCue, saveCues, showSnapshot, writeJson, readJson, events,
+  cfg, devices, show, log, broadcast, raiseAlert, clearAlert, runAction, fireCue, saveCues, showSnapshot, writeJson, readJson, events,
   MODE, SAVE_PATH, LIVE_PATH, STATE_PATH, SUPERVISED, handlers: {}, initExtras: [], checks: [],
   DATA_DIR: process.env.SHOW_DATA_DIR || path.dirname(SETTINGS_PATH), // history and backups go here
   guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
@@ -332,7 +407,8 @@ wss.on('connection', (ws, req) => {
   ws.role = ws.authed ? 'admin' : null;
   const hello = () => ws.send(JSON.stringify(Object.assign({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
-    ui: cfg.ui || {}, groups: groups(), mode: MODE, crew: crew.snapshot(), script: crew.script(),
+    ui: cfg.ui || {}, groups: groups(), mode: MODE, alerts, crew: crew.snapshot(), script: crew.script(),
+    firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
   }, ...ctx.initExtras.map(f => f(ws)))));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required', ...ctx.access.hint() }));
 
@@ -360,9 +436,19 @@ wss.on('connection', (ws, req) => {
         broadcast({ t: 'show', show: showSnapshot() });
       }
       else if (m.t === 'emergency') await emergencyStop(who);
+      else if (m.t === 'alert-dismiss') clearAlert(m.key);
+      else if (m.t === 'save-mics') {
+        saveMics(m.mics, who);
+        ws.send(JSON.stringify({ t: 'saved', id: m.id }));
+      }
       else if (m.t === 'crew') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: crew.handle(m, who) }));
       else if (m.t === 'setup-get') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: setupInfo() }));
       else if (m.t === 'setup-test') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await setup.testDevice(m.device || {}) }));
+      else if (m.t === 'setup-discover') {
+        // look for equipment near the addresses already typed in, as well as on this computer's own networks
+        const hosts = [...new Set([...cfg.devices, ...(m.devices || [])].map(d => d.host).filter(Boolean))];
+        ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await discover.discover({ hosts }) }));
+      }
       else if (m.t === 'setup-save') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: saveSetup(m, who) }));
       else if (m.t === 'autostart') {
         if (!SUPERVISED) throw new Error('Only available when Show Control is started by double-clicking it');
