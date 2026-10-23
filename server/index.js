@@ -82,6 +82,8 @@ async function runAction(a, source) {
     let r;
     try { r = (await d.command(a.cmd, a.args || {})) || { outcome: 'sent' }; }
     catch (e) { r = { outcome: 'not_sent', detail: e.message }; }
+    // a projector in standby is already dark, so a refused shutter-close there is not a problem
+    if (a.cmd === 'shutter' && a.args?.closed && r.outcome === 'busy' && ['standby', 'cooling'].includes(d.snapshot().state?.power)) r = { outcome: 'ok', detail: 'in standby, already dark' };
     if (a.cmd !== 'move' && a.cmd !== 'zoom') {
       log({ device: d.id, level: LEVEL[r.outcome] || 'error', msg: `${a.cmd} ${JSON.stringify(a.args || {})} → ${r.outcome}${r.detail ? `: ${r.detail}` : ''} (${source})`, t: Date.now() });
     }
@@ -149,7 +151,8 @@ function validateCues(cues) {
     // crew tasks: who does what on this cue (shown on their phone's run sheet and cue light)
     const tasks = (Array.isArray(c.crew) ? c.crew : []).filter(x => x && typeof x.role === 'string' && x.role.trim())
       .map(x => ({ role: x.role.trim(), task: String(x.task || '').trim() }));
-    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(c.note ? { note: String(c.note) } : {}), ...(tasks.length ? { crew: tasks } : {}), actions };
+    const scene = String(c.scene ?? '').trim().slice(0, 80); // starts a new scene on the scene map
+    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(scene ? { scene } : {}), ...(c.note ? { note: String(c.note) } : {}), ...(tasks.length ? { crew: tasks } : {}), actions };
   });
 }
 function saveCues(cues, who, note) {
@@ -179,13 +182,22 @@ async function emergencyStop(who) {
   ];
   log({ device: 'show', level: 'error', msg: `EMERGENCY STOP by ${who}`, t: Date.now() });
   const results = (await Promise.all(actions.map(a => runAction(a, `EMERGENCY ${who}`).catch(e => [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }])))).flat()
-    .filter(r => !(r.outcome === 'sent' && devices.get(r.device)?.type === 'ptz'))
-    // a projector in standby is already dark, so a refused shutter-close there is not a problem
-    .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
+    .filter(r => !(r.outcome === 'sent' && devices.get(r.device)?.type === 'ptz'));
   show.emergency = { at: Date.now(), by: who, results };
   broadcast({ t: 'show', show: showSnapshot() });
   events.emit('emergency', who, results);
   return results;
+}
+// Runs some of a cue's actions, each after its own delay. Features hear about the GO and every
+// result (the show report lists them); dept is set when a second operator runs one department.
+function runCueActions(i, actions, source, dept) {
+  const cue = show.cues[i], at = Date.now();
+  events.emit('cue-fired', { i, cue, source, at, dept, actions });
+  for (const a of actions) {
+    setTimeout(() => runAction(a, `cue ${cue.number ?? i + 1}`)
+      .catch(e => { log({ device: a.device, level: 'error', msg: e.message, t: Date.now() }); return [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }]; })
+      .then(results => events.emit('cue-results', { i, at, action: a, results })), (a.delay || 0) * 1000);
+  }
 }
 function fireCue(i, source) {
   const cue = show.cues[i];
@@ -193,9 +205,7 @@ function fireCue(i, source) {
   show.lastFired = i;
   show.index = Math.min(i + 1, show.cues.length);
   log({ device: 'show', level: 'go', msg: `GO ${cue.number ?? i + 1} ${cue.label || ''} (${source})`, t: Date.now() });
-  for (const a of cue.actions || []) {
-    setTimeout(() => runAction(a, `cue ${cue.number ?? i + 1}`).catch(e => log({ device: a.device, level: 'error', msg: e.message, t: Date.now() })), (a.delay || 0) * 1000);
-  }
+  runCueActions(i, (cue.actions || []).filter(a => !ctx.heldBack(a)), source);
   broadcast({ t: 'show', show: showSnapshot() });
   saveState();
   crew.fired(i);
@@ -266,7 +276,7 @@ function saveSetup(m, who) {
 const SETTINGS_PATH = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
 const events = new EventEmitter();
 const ctx = {
-  cfg, devices, show, log, broadcast, runAction, fireCue, saveCues, showSnapshot, writeJson, readJson, events,
+  cfg, devices, show, log, broadcast, runAction, runCueActions, fireCue, saveCues, showSnapshot, writeJson, readJson, events, crew, groups,
   MODE, SAVE_PATH, LIVE_PATH, STATE_PATH, SUPERVISED, handlers: {}, initExtras: [], checks: [],
   DATA_DIR: process.env.SHOW_DATA_DIR || path.dirname(SETTINGS_PATH), // history and backups go here
   guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
@@ -279,13 +289,15 @@ const ctx = {
   startDevices() { if (this.devicesStarted) return; this.devicesStarted = true; for (const d of devices.values()) d.start(); },
   stopDevices() { if (this.devicesStarted) for (const d of devices.values()) d.stop(); },
   saveState: () => saveState(),
+  heldBack: () => false, // (action) => true when a second operator runs that department (features/departments.js)
+  routes: [],            // (app) => adds HTTP routes (features/report.js serves report files)
   settings: () => readJson(SETTINGS_PATH, null) ?? readJson(SAVE_PATH, cfg),
   saveSettings(patch) {
     const cur = readJson(SETTINGS_PATH, null) ?? (MODE === 'practice' ? { live: false } : readJson(SAVE_PATH, cfg));
     writeJson(SETTINGS_PATH, { ...cur, ...patch });
   },
 };
-for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens']) require(`./features/${f}`)(ctx);
+for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report']) require(`./features/${f}`)(ctx);
 
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
@@ -296,6 +308,7 @@ function lanAddresses() {
     .sort((a, b) => a.ts - b.ts); // local network first, Tailscale last
 }
 const app = express();
+for (const route of ctx.routes) route(app);
 // "Connect your iPad" page: address + QR code to scan with the iPad camera.
 app.get('/connect', async (_, res) => {
   const addrs = lanAddresses();

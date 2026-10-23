@@ -30,6 +30,7 @@ module.exports = function health(ctx) {
     recent.push(a); if (recent.length > 50) recent.shift();
     if (level === 'error') active.set(key, a); else active.delete(key);
     broadcast({ t: 'alert', alert: a });
+    ctx.events.emit('alert', a);
     log({ device: key, level: level === 'error' ? 'error' : 'info', msg, t: a.at });
     queuePush(a);
     return a;

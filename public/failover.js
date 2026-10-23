@@ -75,7 +75,7 @@ const store = (k, v) => { try { if (v === undefined) return localStorage.getItem
 const screenId = store('screenId') || store('screenId', `s${Math.random().toString(36).slice(2, 12)}`);
 const isNew = !store('screenName');
 let screenName = store('screenName') || store('screenName', guessName());
-const view = () => ({ tab: S.tab, camSel: S.camSel || null, projGroup: S.projGroup || null, screenLocked: document.body.classList.contains('locked') });
+const view = () => ({ tab: S.tab, camSel: S.camSel || null, projGroup: S.projGroup || null, dept: S.myDept || null, screenLocked: document.body.classList.contains('locked') });
 let lastView = '';
 const hello = () => { lastView = JSON.stringify(view()); send({ t: 'screen-hello', screen: screenId, name: screenName, view: view() }); };
 setInterval(() => { if (ws?.readyState === 1 && S.show && JSON.stringify(view()) !== lastView) hello(); }, 2000);
@@ -88,7 +88,7 @@ onMsg('init', m => {
   if (isNew && !offered && gone.length && !(S.failover && !S.failover.active)) { offered = true; setTimeout(() => offerTakeover(gone), 300); }
 });
 onMsg('screens', m => { S.screens = m.screens; (updaters.__screens || []).forEach(f => f()); });
-const TAB_WORDS = { show: 'Show', lx: 'Lighting', snd: 'Sound', proj: 'Projection', cam: 'Cameras', sys: 'System', edit: 'Edit cues', setup: 'Setup', health: 'Health', history: 'Cue list history' };
+const TAB_WORDS = { show: 'Show', lx: 'Lighting', snd: 'Sound', proj: 'Projection', cam: 'Cameras', sys: 'System', edit: 'Edit cues', setup: 'Setup', health: 'Health', history: 'Cue list history', map: 'Scene map', dept: 'Second operator' };
 async function carryOn(s, force) {
   const r = await ask('screen-takeover', { from: s.id, force });
   if (r.error) { if (/still connected/.test(r.error) && confirm(r.error)) return carryOn(s, true); return toast(r.error, 5000); }
@@ -96,6 +96,7 @@ async function carryOn(s, force) {
   const v = r.view || {};
   if (v.camSel) S.camSel = v.camSel;
   if (v.projGroup) S.projGroup = v.projGroup;
+  if (v.dept) S.myDept = store('myDept', v.dept); // a second operator's spare carries on with the same department
   setLock(!!v.screenLocked); renderLock();
   S.tab = v.tab && v.tab !== 'setup' ? v.tab : 'show'; store('tab', S.tab);
   render(); hello();

@@ -177,6 +177,28 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   off, with the same name, tab, camera and projector group. *Carry on here* on the Screens card does
   the same at any time.
 
+## Running the show: reports, scene map, rehearsal jump, second operator
+
+- **Show report**: every GO (with what each piece of equipment answered), equipment that stopped
+  answering, emergency stops, jumps, crew notes and calls. A few minutes after the last cue it is saved
+  as a PDF in `Show Control/Show reports` and sent to the phone with the phone alerts (System > Show
+  reports to change the wait, the paper size, or to make one by hand). A GO from the top after the end
+  starts the next report, so a matinee and an evening get one each. A run that never reaches the last
+  cue is finished after 4 hours without a GO.
+- **Scene map** (Show > Scene map): the whole show as a timeline with a lane per department (lighting,
+  sound, projection, cameras, crew), timed from the last full show, and a cue-by-cue table. Give the
+  first cue of a scene a scene name in *Edit cues* to see the scenes.
+- **Rehearsal jump** (Show > Jump to…, or tap a cue on the scene map): sets the equipment as it would
+  be at that point without running the cues in between. For each device it repeats the last thing the
+  cue list told it to do (Eos cue, snapped with no fade or with its own fade, then any GOs; mixer scene
+  and levels; camera presets; projector power, shutter and input), fades out QLab and moves its
+  playhead to the next sound cue. Macros and command lines are listed, not repeated. Not allowed
+  while the show is locked.
+- **Second operator** (Show > Second operator): a deputy runs one department (say sound) from their
+  own screen with its own GO and their own place in the cue list, on the stage manager's call. The
+  main GO leaves that department out until it is handed back. Each device's department comes from its
+  type; `"dept": "proj"` on a device in the show file overrides it.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:

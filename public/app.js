@@ -22,6 +22,8 @@ const updaters = {}; // device id → [fn(snapshot)]
 const VIEWS = {};       // tab name → () => element
 const NAV_PARENT = { edit: 'show', setup: 'sys' }; // sub-screens light up their parent tab
 const SYS_CARDS = [];   // () => element, shown on the System tab
+const SHOW_BUTTONS = []; // () => element, buttons next to "Edit cues" on the Show tab
+const STANDBY_EXTRAS = []; // (show) => element or null, extra lines in the standby box
 const msgHandlers = {}; // message type → [fn(msg)], called before the built-in handling
 const onMsg = (t, fn) => (msgHandlers[t] ||= []).push(fn);
 const onDevice = (id, fn) => { (updaters[id] ||= []).push(fn); if (S.devices[id]) fn(S.devices[id]); };
@@ -201,7 +203,7 @@ function showTab() {
     fill(stby, h('small', {}, 'STANDBY'), h('div', { class: 'lbl' }, next ? `${next.number ?? sh.index + 1}  ${next.label}` : 'End of show'),
       next?.note && h('div', { class: 'cue-note' }, next.note),
       h('div', { class: 'acts' }, next ? (next.actions || []).map(actionText).join(' · ') : ''),
-      warn);
+      STANDBY_EXTRAS.map(f => f(sh)), warn);
     warn.replaceChildren(warnLine(next));
     list.replaceChildren(...sh.cues.map((c, i) => h('div', { class: `cue ${i < sh.index ? 'done' : ''} ${i === sh.index ? 'next' : ''} ${i === sh.lastFired ? 'last' : ''}` },
       h('div', { class: 'n' }, c.number ?? i + 1, setReadyDot(h('i'), c)),
@@ -228,7 +230,7 @@ function showTab() {
         h('button', { onclick: () => cmd(qlab.id, 'stop') }, 'Stop'), h('button', { class: 'danger', onclick: () => cmd(qlab.id, 'panic') }, 'Panic'))));
   return h('div', {},
     h('div', { class: 'showtop' }, stby, go),
-    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, h('button', { class: 'always', onclick: () => (location.href = '/sm.html') }, 'Stage manager view'),
+    h('div', { class: 'row', style: 'margin-bottom:10px;justify-content:flex-end' }, SHOW_BUTTONS.map(f => f()), h('button', { class: 'always', onclick: () => (location.href = '/sm.html') }, 'Stage manager view'),
       h('button', { onclick: () => { S.tab = 'edit'; render(); } }, '✎ Edit cues')),
     h('div', { class: 'timers', style: 'margin-bottom:10px' }, tmr('show', 'Show'), tmr('act', S.show.timers.label)),
     quick,
@@ -532,6 +534,7 @@ function editTab() {
           h('label', { style: 'flex:0 0 110px' }, 'Number', h('input', { inputmode: 'decimal', value: c.number ?? '', onchange: e => { c.number = e.target.value === '' ? '' : isNaN(e.target.value) ? e.target.value : Number(e.target.value); ed.dirty = true; } })),
           h('label', { style: 'flex:1' }, 'Name', h('input', { value: c.label, onchange: e => { c.label = e.target.value; ed.dirty = true; } }))),
         h('label', {}, 'Note for the operator (optional)', h('input', { value: c.note || '', placeholder: 'e.g. On SM call', onchange: e => { c.note = e.target.value; ed.dirty = true; } })),
+        h('label', {}, 'Starts a new scene (optional, for the scene map)', h('input', { value: c.scene || '', placeholder: 'e.g. Act 1 · Scene 2: The ball', onchange: e => { c.scene = e.target.value; ed.dirty = true; } })),
         h('div', { class: 'sub' }, 'What this cue does'),
         c.actions.map((a, i) => actionEditor(a, c.actions, i, redraw)),
         h('button', { onclick: () => { const a = newAction(); if (a) { c.actions.push(a); redraw(); } } }, '+ Add an action'),
