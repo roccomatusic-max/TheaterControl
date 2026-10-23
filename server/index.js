@@ -9,6 +9,8 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const drivers = require('./drivers');
 const setup = require('./setup');
+const { MicPlan, validateMics } = require('./mics');
+const FeedbackWatch = require('./feedback');
 
 const cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.join(__dirname, '../config/show.json'));
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
@@ -25,6 +27,16 @@ const LIVE_PATH = process.env.SHOW_LIVE_PATH || cfgPath;
 const SUPERVISED = !!process.env.SHOW_SUPERVISED; // the launcher restarts us when we exit with RESTART
 const RESTART = 75;
 
+// Practice mode keeps a copy of the practice show in the user's folder. Equipment added to the
+// practice gear in a later version (e.g. the radio mic receivers) is added to that copy here.
+if (MODE === 'practice' && process.env.SHOW_SIM_CONFIG) {
+  try {
+    const sim = JSON.parse(fs.readFileSync(process.env.SHOW_SIM_CONFIG, 'utf8'));
+    for (const d of sim.devices || []) if (!cfg.devices.some(x => x.id === d.id)) cfg.devices.push(d);
+    for (const k of ['mics', 'sound']) if (!cfg[k] && sim[k]) cfg[k] = sim[k];
+  } catch { /* no practice show to merge */ }
+}
+
 // ---------- devices ----------
 const logRing = [];
 const devices = new Map();
@@ -39,8 +51,40 @@ for (const dc of cfg.devices) {
   if (!D) { console.warn(`unknown device type ${dc.type}`); continue; }
   const d = new D(dc);
   d.on('log', log);
-  d.on('changed', () => queueDevice(d));
+  d.on('changed', () => { queueDevice(d); micPlan?.refresh(); });
+  d.on('meters', onMeters);
   devices.set(d.id, d);
+}
+// The mic plot is a device too, so cues can switch the mics for a scene ("device": "mics").
+const micPlan = new MicPlan(cfg.mics, devices);
+micPlan.on('log', log);
+micPlan.on('changed', () => queueDevice(micPlan));
+micPlan.on('alert', raiseAlert);
+devices.set(micPlan.id, micPlan);
+
+// ---------- alerts (possible feedback, low mic batteries) ----------
+// Shown on every iPad and phone until someone dismisses them. Same key = same alert, not a new one.
+let alerts = [];
+function raiseAlert(a) {
+  alerts = [{ ...a, at: Date.now() }, ...alerts.filter(x => x.key !== a.key)].slice(0, 20);
+  log({ device: a.kind === 'feedback' ? a.device : 'mics', level: 'warn', msg: `${a.title}${a.detail ? ` (${a.detail})` : ''}`, t: Date.now() });
+  broadcast({ t: 'alerts', alerts });
+}
+
+// Mixer input meters: sent to the iPads at most 10 times a second, and watched for feedback.
+const fbCfg = cfg.sound?.feedback || {};
+const feedback = fbCfg.enabled === false ? null : new FeedbackWatch(fbCfg);
+const meterSent = new Map();
+function onMeters(d) {
+  const now = Date.now();
+  if (now - (meterSent.get(d.id) || 0) >= 100) { meterSent.set(d.id, now); broadcast({ t: 'meters', device: d.id, levels: d.levels }); }
+  for (const hit of feedback?.push(d.id, d.levels, now) || []) {
+    const name = d.state.channels[hit.channel]?.name || `CH${hit.channel + 1}`;
+    const pack = micPlan.plan.packs.find(p => p.channel === hit.channel && micPlan.mixerFor(p) === d);
+    const who = pack && micPlan.wearer(pack);
+    raiseAlert({ key: `fb:${d.id}:${hit.channel}`, kind: 'feedback', device: d.id, title: `Possible feedback on ${name}${who ? ` (${who})` : ''}`,
+      detail: `steady tone at ${hit.db.toFixed(0)} dB on channel ${hit.channel + 1}`, action: { label: `Mute ${name}`, device: d.id, cmd: 'on', args: { strip: 'ch', index: hit.channel, on: false } } });
+  }
 }
 
 // Coalesce state pushes (TF sync and VISCA polls can be chatty) to ≤ 20/s per device.
@@ -157,6 +201,19 @@ function saveCues(cues, who) {
   saveState();
 }
 
+// Mic plot edits from the iPad: validated, backed up, saved to the show file, used at once.
+function saveMics(m, who) {
+  const clean = validateMics(m, id => devices.has(id) || cfg.devices.some(d => d.id === id));
+  let onDisk = cfg;
+  try { onDisk = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf8')); } catch { /* first save of a practice copy */ }
+  if (fs.existsSync(SAVE_PATH)) fs.copyFileSync(SAVE_PATH, `${SAVE_PATH}.bak`);
+  // a practice copy also keeps the practice gear the mic plot points at
+  writeJson(SAVE_PATH, { ...onDisk, ...(MODE === 'practice' ? { devices: cfg.devices } : {}), mics: clean });
+  cfg.mics = clean;
+  micPlan.load(clean);
+  log({ device: 'mics', level: 'cmd', msg: `mic plot saved (${clean.packs.length} packs, ${clean.scenes.length} scenes) by ${who}`, t: Date.now() });
+}
+
 // Emergency stop: everything that makes noise, light or movement, all at once.
 // Default: QLab panic, close every projector shutter, stop every PTZ camera. Add more in
 // config "safety": { "emergency": [ { "device": "eos", "cmd": "macro", "args": { "macro": 999 } } ] }
@@ -221,6 +278,7 @@ function saveSetup(m, who) {
   } else if (MODE === 'practice') {
     const live = readJson(LIVE_PATH, {}), practice = readJson(SAVE_PATH, cfg);
     out = { ...live, ...practice, server: live.server || practice.server, devices: list, live: m.action === 'go-live' };
+    if (!out.mics && cfg.mics) out.mics = cfg.mics; // the mic plot comes with you, like the cue list
     out.show = { ...(practice.show || {}), name };
   } else {
     const live = readJson(LIVE_PATH, cfg);
@@ -239,7 +297,7 @@ function saveSetup(m, who) {
   writeJson(file, out);
   // Steps in cues that point at equipment that's gone or has no address are skipped at GO; say so now.
   const missing = [...new Set((out.show?.cues || []).flatMap(c => (c.actions || []).map(a => a.device))
-    .filter(id => !id.startsWith('group:') && !ids.has(id)))];
+    .filter(id => !id.startsWith('group:') && id !== 'mics' && !ids.has(id)))];
   const restarting = SUPERVISED && (m.action !== 'save' || MODE !== 'practice');
   log({ device: 'core', level: 'cmd', msg: `equipment setup saved (${m.action}) by ${who}${restarting ? ', restarting' : ''}`, t: Date.now() });
   if (restarting) setTimeout(() => { for (const d of devices.values()) d.stop(); process.exit(RESTART); }, 500);
@@ -290,7 +348,7 @@ wss.on('connection', (ws, req) => {
   ws.authed = !PIN;
   const hello = () => ws.send(JSON.stringify({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
-    ui: cfg.ui || {}, groups: groups(), mode: MODE,
+    ui: cfg.ui || {}, groups: groups(), mode: MODE, alerts,
   }));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
 
@@ -316,6 +374,11 @@ wss.on('connection', (ws, req) => {
         broadcast({ t: 'show', show: showSnapshot() });
       }
       else if (m.t === 'emergency') await emergencyStop(who);
+      else if (m.t === 'alert-dismiss') { alerts = alerts.filter(a => a.key !== m.key); broadcast({ t: 'alerts', alerts }); }
+      else if (m.t === 'save-mics') {
+        saveMics(m.mics, who);
+        ws.send(JSON.stringify({ t: 'saved', id: m.id }));
+      }
       else if (m.t === 'setup-get') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: setupInfo() }));
       else if (m.t === 'setup-test') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await setup.testDevice(m.device || {}) }));
       else if (m.t === 'setup-save') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: saveSetup(m, who) }));

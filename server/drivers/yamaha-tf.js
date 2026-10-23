@@ -1,6 +1,10 @@
 // Yamaha TF1/TF3/TF5 via the Yamaha remote control protocol (plain text over TCP port 49280,
 // same family as CL/QL/RIVAGE "RCP"). Fader levels are in 0.01 dB; -32768 means -inf.
 // Mixer must be on the same subnet; no setup on the desk beyond its IP address.
+// Input meters: "mtrstart <meter path> <interval ms>" asks the desk to stream
+//   NOTIFY mtr <meter path> <type> <hex byte per channel>…
+// UNVERIFIED on TF firmware: the meter path and byte scale are configurable ("meterPath",
+// "meterMs"). If the desk refuses the request, meters show as unavailable and nothing else changes.
 const net = require('net');
 const Driver = require('./base');
 
@@ -15,7 +19,10 @@ const P = {
   dcaName: 'MIXER:Current/DCA/Label/Name',
   stLevel: 'MIXER:Current/St/Fader/Level',
   stOn: 'MIXER:Current/St/Fader/On',
+  meter: 'MIXER:Current/Meter/InCh',
 };
+// Meter byte → dBFS: 0 is silence, 127 is full scale, 0.5 dB a step.
+const byteToDb = b => (b <= 0 ? null : Math.max(-63.5, (Math.min(b, 127) - 127) / 2));
 
 class YamahaTFDriver extends Driver {
   constructor(cfg) {
@@ -27,7 +34,9 @@ class YamahaTFDriver extends Driver {
       dcas: Array.from({ length: d }, (_, i) => strip(i, 'DCA')),
       master: { level: NEG_INF, on: true },
       lastScene: null,
+      meters: cfg.meters === false ? 'off' : 'waiting', // 'waiting' | 'on' | 'unsupported' | 'off'
     };
+    this.levels = []; // latest input meter frame, dBFS per channel (null = silence); sent as its own message, not in state
     this.buf = '';
   }
 
@@ -37,7 +46,7 @@ class YamahaTFDriver extends Driver {
     const { host, port = 49280 } = this.cfg;
     const sock = net.connect(port, host);
     sock.setEncoding('utf8');
-    sock.on('connect', () => { this.log(`connected ${host}:${port}`); this.seen(); this.syncAll(); });
+    sock.on('connect', () => { this.log(`connected ${host}:${port}`); this.seen(); this.syncAll(); this.startMeters(); });
     sock.on('data', d => {
       this.buf += d;
       let i;
@@ -51,6 +60,22 @@ class YamahaTFDriver extends Driver {
     this.sock = sock;
     clearInterval(this.ka);
     this.ka = setInterval(() => this.write('devstatus runmode'), 3000);
+    clearInterval(this.mtr);
+    this.mtr = setInterval(() => this.startMeters(), 9000); // meter streams time out unless renewed
+  }
+
+  startMeters() {
+    if (this.state.meters === 'off' || this.state.meters === 'unsupported') return;
+    this.write(`mtrstart ${this.cfg.meterPath || P.meter} ${this.cfg.meterMs || 100}`);
+  }
+
+  // NOTIFY mtr MIXER:Current/Meter/InCh 2 7a 64 00 …  (one byte per channel, after the type)
+  onMeters(rest) {
+    const bytes = rest.split(/\s+/).filter(t => /^[0-9a-f]{2}$/i.test(t)).map(t => parseInt(t, 16));
+    const n = this.state.channels.length;
+    this.levels = bytes.slice(-n).map(byteToDb);
+    if (this.state.meters !== 'on') this.patch({ meters: 'on' });
+    this.emit('meters', this);
   }
 
   write(line) { if (this.sock && !this.sock.destroyed) this.sock.write(line + '\n'); }
@@ -66,6 +91,12 @@ class YamahaTFDriver extends Driver {
   onLine(line) {
     if (!line) return;
     this.seen();
+    const mt = line.match(/^NOTIFY mtr\s+\S+\s+(.*)$/);
+    if (mt) return this.onMeters(mt[1]);
+    if (/^ERROR mtrstart/.test(line)) {
+      if (this.state.meters !== 'unsupported') { this.log(`the mixer did not accept the meter request (${line}); level meters are off`, 'warn'); this.patch({ meters: 'unsupported' }); }
+      return;
+    }
     const m = line.match(/^(OK|NOTIFY|OKm)\s+(?:get|set)\s+(\S+)\s+(\d+)\s+(\d+)\s+(?:"([^"]*)"|(-?\d+))/);
     if (!m) { if (line.startsWith('ERROR')) this.log(line, 'warn'); return; }
     const [, , path, x, , str, num] = m;
@@ -100,7 +131,7 @@ class YamahaTFDriver extends Driver {
     }
   }
 
-  stop() { super.stop(); this.stopped = true; clearTimeout(this.retry); clearInterval(this.ka); this.sock?.destroy(); }
+  stop() { super.stop(); this.stopped = true; clearTimeout(this.retry); clearInterval(this.ka); clearInterval(this.mtr); this.sock?.destroy(); }
 }
 
 YamahaTFDriver.NEG_INF = NEG_INF;
