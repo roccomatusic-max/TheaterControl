@@ -16,7 +16,7 @@ class PanasonicCamDriver extends Driver {
   constructor(cfg) {
     super(cfg);
     this.kind = 'camera';
-    this.state = { power: null, lastPreset: null, presets: cfg.presets || [], stream: cfg.stream || null, tally: false };
+    this.state = { power: null, lastPreset: null, presets: cfg.presets || [], stream: cfg.stream || (cfg.video ? { type: 'live', src: cfg.id } : null), tally: false };
   }
   start() {
     this.setStatus('connecting');
@@ -62,14 +62,16 @@ class PanasonicCamDriver extends Driver {
 
 PanasonicCamDriver.meta = {
   label: 'Panasonic PTZ camera (AW-UE / AW-HE)', category: 'cameras',
-  fields: [['username', 'text', 'Username (if you set one)', ''], ['password', 'password', 'Password', '']],
+  fields: [['username', 'text', 'Username (if you set one)', ''], ['password', 'password', 'Password', ''],
+    ['video', 'video', 'Video address', 'rtsp://… (tap Find video)']],
   help: [
     'Plug the camera into the show network switch and give it a fixed address (Panasonic\'s Easy IP Setup tool finds it, or use the camera\'s menu).',
     'Open the camera\'s web page (type its address into a browser). Under Maintenance or User mng., check whether a login is needed for control; if so, type it here.',
-    'Type the address and tap Test.',
+    'Type the address and tap Test. Then tap Find video to fill in the video address (usually rtsp://<address>:554/MediaInput/h264/stream_1).',
+    'No picture? On the camera\'s web page, under Setup > Video over IP, check the H.264 stream is on and RTSP is allowed.',
   ],
-  commands: { preset: [['preset', 'number', 1, 'Preset']], home: [], tally: [['on', 'bool:On|Off', true, 'Tally']], power: [['on', 'bool:On|Off', true, 'Power']] },
-  commandLabels: { preset: 'Go to preset', home: 'Home', tally: 'Tally light', power: 'Power' },
+  commands: { preset: [['preset', 'preset', 1, 'Shot']], home: [], tally: [['on', 'bool:On|Off', true, 'Tally']], power: [['on', 'bool:On|Off', true, 'Power']] },
+  commandLabels: { preset: 'Go to preset shot', home: 'Home', tally: 'Tally light', power: 'Power' },
 };
 
 module.exports = PanasonicCamDriver;

@@ -2,3 +2,10 @@ node_modules/
 *.log
 dist/
 .cache/
+runtime/
+config/.go2rtc.yaml
+config/.https/
+config/Recordings/
+config/Notes/
+config/.*.state.json
+config/.go2rtc.pid

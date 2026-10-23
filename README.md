@@ -9,7 +9,9 @@ and used from an iPad or phone in a browser. It works with no internet.
 | Yamaha TF1/3/5 | Yamaha remote control protocol, TCP 49280 | Input + DCA + stereo faders and on/off, two-way (moves on the desk show on the iPad), scene recall |
 | QLab 4/5 | OSC over UDP 53000 | GO, stop, panic, pause/resume, playhead, start any cue; shows playhead + running cues |
 | PTZ cameras | VISCA-over-IP (UDP 52381) or raw VISCA TCP (5678) | Joystick pan/tilt, zoom, focus, presets (tap = recall, hold = store), tally, home, power |
-| Camera video | go2rtc / MediaMTX → WebRTC, or MJPEG/HLS | Live view on the iPad, low latency |
+| Camera video | RTSP from any IP camera, through the bundled go2rtc relay → WebRTC | Live view on iPads, phones and TVs (well under a second), several at once, pop-out, night view, snapshots to notes, recording with cue markers |
+| Fixed / infrared cameras | RTSP (Hikvision, Dahua, Axis, Reolink, Tapo…) | Video-only backstage and wings views |
+| Spare phones | WebRTC from the phone's browser | Any phone becomes an extra wings camera |
 | Panasonic projectors (PT-DZ13K, PT-DZ770 series) | Panasonic LAN protocol, TCP 1024 (+ PJLink for health) | Power with confirmation, shutter, inputs, lamp hours, fan/lamp/temperature health, lens home |
 | Shure ULX-D, QLX-D, SLX-D, Axient Digital receivers | Shure text protocol, TCP 2202 | Pack battery (bars + time left), signal, whether a pack is switched on |
 | Any PJLink projector / display | PJLink class 1, TCP 4352 | Power, shutter, inputs, lamp hours, health, make/model |
@@ -31,7 +33,8 @@ X32, Art-Net consoles and nodes, Sony-style cameras, QLab, Companion, HyperDeck.
 New kinds of equipment can be added as plugins without changing the app: see [plugins/README.md](plugins/README.md).
 
 **Show cues** tie it together: one GO can fire an Eos cue, a QLab cue, a TF scene and camera
-presets, with optional per-action delays. There are also show/act timers, a lock button so a
+presets, with optional per-action delays (a "Cameras follow cues" switch holds the cameras when
+you want to drive them by hand). There are also show/act timers, a lock button so a
 pocketed phone can't fire anything, and an optional PIN.
 
 <p>
@@ -185,23 +188,59 @@ from Projector Control.
 
 ## Video
 
-Browsers (especially iPad Safari) can't play RTSP or NDI directly. Run **go2rtc** on the server
-(`deploy/go2rtc.yaml`). It pulls each camera's RTSP once and serves WebRTC to every tablet with
-well under a second of delay. In the camera config:
+Live camera video works out of the box. Show Control runs **go2rtc** (a small video relay,
+included in the Mac and Windows downloads) and writes its settings from the camera list.
+go2rtc pulls each camera's RTSP feed once and hands it to every iPad as WebRTC, with well under
+a second of delay. It only listens on the show computer; iPads reach it through Show Control at
+`/video`, behind the same PIN. If WebRTC can't get through, the iPad falls back to HLS (Safari)
+or an MP4 stream.
 
-```json
-"stream": { "type": "go2rtc", "url": "http://<server>:1984", "src": "cam1" }
-```
+- **Adding a camera:** System → Equipment setup, type the camera's address, then **Find video**.
+  It tries the usual RTSP addresses for PTZOptics, Sony, Panasonic, Marshall, Lumens, AVer,
+  BirdDog, Canon, Hikvision, Dahua, Axis, Reolink and Tapo, asks for the camera's login if needed,
+  and fills in the one that works. In a show file it is the camera's `"video"` field:
+  `"video": "rtsp://10.101.60.11:554/2"`. Use the camera's smaller (sub) stream, in H.264.
+- **Cameras tab:** one camera with controls, **All** (grid, or one big with the rest small), ⧉ to
+  pop a camera out so it stays on screen over other tabs and apps, 🔆 low-light view for dark areas,
+  📷 snapshot to notes, ⤢ full screen. **IR** switches a PTZ camera's infrared night mode
+  (Sony VISCA CAM_ICR; not every camera has it). The Show tab can keep a camera in view too.
+- **Recording:** ● Record (or "Record when the show timer starts") saves every camera with video to
+  `Show Control/Recordings/<date time show>/`, one MP4 per camera, straight from the camera (no
+  re-encoding). Every GO, note and mark is saved with its time, so **Recordings → Watch** jumps
+  to any cue. If a camera drops out it carries on in a new part file.
+- **Notes:** 📷 on any camera grabs a picture; add a line and it is kept with the time and cue.
+  **Notes → Export all** makes one page with every note and picture, to print or send.
+- **Screens:** System → Camera screens and phone cameras gives a **backstage TV** link (camera, standby
+  cue, running time, clock) and a **lobby screen** link (camera, show name, clock), with QR codes.
+  Open them in a smart TV's browser. They use a view-only key, so a screen can't fire anything.
+- **Phone cameras:** the same card has a link for a spare phone. Phones only allow the camera on a
+  secure page, so Show Control also serves HTTPS on port 8443 (the HTTP port + 363) with a
+  certificate it makes itself; the phone warns once that it isn't private. Up to four phones.
+- **Focus helper** (Lighting tab): watch a camera while you select a channel and nudge pan, tilt,
+  zoom, edge and iris with the Eos encoder wheels. Not yet tried on a real console.
+- **Content check** (Projection tab): asks QLab for every cue it reports as broken (missing audio
+  or video files), and lists the projectors' power, input and shutter, and camera connections.
+  **Black out all** closes every shutter and works with the screen locked; **Restore** reopens
+  only the ones that were open.
 
-Other options: `"mediamtx"` (MediaMTX WebRTC page), `"mjpeg"` (camera's own MJPEG URL),
-`"hls"` (works natively on iOS, a few seconds of delay), `"iframe"`.
-For NDI|HX cameras, turn on their RTSP output, or bridge NDI to RTSP on the server.
-For recording or streaming the show, OBS on the server can take the same feeds.
+Ports on the show computer: 8555 (TCP and UDP) for WebRTC video to iPads, 8443 for the phone page.
+go2rtc's own API (18984) and RTSP (18554) only listen on the show computer itself; OBS or VLC on
+that computer can take `rtsp://127.0.0.1:18554/<camera id>`. Change them with `"video":
+{ "webrtcPort", "apiPort", "rtspPort" }` and `"server": { "httpsPort" }` in the show file.
+
+Running from source: `node scripts/package.js video` downloads go2rtc for your computer into
+`runtime/`, or set `GO2RTC_BIN`, or put `go2rtc` on the PATH. Without it everything else works and
+the Cameras tab says live video is not installed. The older `"stream"` options (`go2rtc`,
+`mediamtx`, `mjpeg`, `hls`, `iframe`) still work for a relay you run yourself.
+
+NDI cameras: turn on their RTSP output (most NDI|HX PTZs have one).
 
 ## How it's built
 
 ```
 server/index.js          HTTP + WebSocket hub, show cue stack, timers, PIN, log
+server/video.js          runs the go2rtc video relay and passes /video through to it
+server/recorder.js       show recordings with cue markers; server/notes.js snapshot notes
 server/drivers/*.js      one driver per device type; each exposes status, state, command()
 server/catalog.js        the "Add equipment" list: makes/models → driver, defaults, set-up steps
 server/discover.js       "Find equipment on the network"

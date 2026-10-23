@@ -65,6 +65,7 @@
       "type": "ptz",
       "name": "Cam 1",
       "host": "10.101.60.11",
+      "video": "rtsp://10.101.60.11:554/2",
       "protocol": "visca-ip",
       "port": 52381,
       "presets": [
@@ -72,12 +73,7 @@
           "n": 1,
           "label": "Wide"
         }
-      ],
-      "stream": {
-        "type": "go2rtc",
-        "url": "http://10.101.50.5:1984",
-        "src": "cam1"
-      }
+      ]
     },
     {
       "id": "projL",
