@@ -18,6 +18,8 @@ const PROJECTOR = ['panasonic', 'pjlink'];
 module.exports = function health(ctx) {
   const { devices, show, log, broadcast } = ctx;
   const nameOf = d => (d.name || d.id).split(' · ')[0];
+  // The mic plot (and anything else a feature adds as "virtual") is a list kept elsewhere, not equipment.
+  const isGear = d => !d.virtual && d.type !== 'mics';
   const track = new Map(); // device id → { status, since, drops: [times], timer, alerted }
   const recent = []; // last 50 alerts
   const active = new Map(); // device id (or 'core') → alert still showing
@@ -25,16 +27,29 @@ module.exports = function health(ctx) {
   let lastCheck = null;
 
   // ---------- alerts ----------
+  // One list of alerts on every screen (ctx.raiseAlert): these (equipment that stopped answering,
+  // the emergency stop, an unexpected restart) and the sound ones (possible feedback, low mic
+  // batteries). Every alert also goes to the Health screen's recent list and to the phone.
+  function remember(a) { recent.push(a); if (recent.length > 50) recent.shift(); }
   function raise(level, key, msg, extra = {}) {
-    const a = { id: ++seq, at: Date.now(), level, key, msg, ...extra };
-    recent.push(a); if (recent.length > 50) recent.shift();
-    if (level === 'error') active.set(key, a); else active.delete(key);
-    broadcast({ t: 'alert', alert: a });
-    ctx.events.emit('alert', a);
-    log({ device: key, level: level === 'error' ? 'error' : 'info', msg, t: a.at });
-    queuePush(a);
-    return a;
+    if (level !== 'ok') {
+      active.set(key, { at: Date.now(), key, msg });
+      ctx.raiseAlert({ key, device: key, level, kind: extra.kind || 'equipment', title: msg, ...extra });
+      return;
+    }
+    // back to normal: the alert goes away, screens get a short notice, the phone hears about it
+    const a = { id: ++seq, at: Date.now(), level, key, msg };
+    active.delete(key);
+    ctx.clearAlert(key);
+    broadcast({ t: 'notice', msg });
+    log({ device: key, level: 'info', msg, t: a.at });
+    remember(a); queuePush(a);
+    ctx.events.emit('alert-ok', a);
   }
+  ctx.events.on('alert', x => {
+    const a = { id: ++seq, at: x.at, level: x.level || (x.kind === 'feedback' ? 'error' : 'warn'), key: x.key, msg: x.detail ? `${x.title} (${x.detail})` : x.title };
+    remember(a); queuePush(a);
+  });
   // Alerts that arrive together (a switch dies and everything drops) go to the phone as one message.
   // Each new alert waits a little longer for others (equipment notices a dead switch at different
   // speeds), but never more than four times the wait after the first one.
@@ -67,17 +82,17 @@ module.exports = function health(ctx) {
       t.drops.push(Date.now());
       t.timer = setTimeout(() => {
         t.timer = null; t.alerted = true;
-        raise('error', d.id, `${nameOf(d)} stopped answering`);
+        raise('error', d.id, `${nameOf(d)} stopped answering`, { name: nameOf(d) });
       }, GRACE_MS);
     }
   }
-  for (const d of devices.values()) {
+  for (const d of [...devices.values()].filter(isGear)) {
     track.set(d.id, { status: d.status, since: Date.now(), drops: [] });
     d.on('changed', onChange);
   }
-  ctx.events.on('emergency', who => raise('error', 'emergency', `Emergency STOP pressed (${who})`));
+  ctx.events.on('emergency', who => raise('error', 'emergency', `Emergency STOP pressed (${who})`, { kind: 'emergency' }));
   ctx.events.on('emergency-cleared', () => { if (active.has('emergency')) raise('ok', 'emergency', 'Emergency stop cleared'); });
-  if (process.env.SHOW_RECOVERED) setTimeout(() => raise('warn', 'core', 'Show Control stopped unexpectedly and started again by itself'), 3000);
+  if (process.env.SHOW_RECOVERED) setTimeout(() => raise('warn', 'core', 'Show Control stopped unexpectedly and started again by itself', { kind: 'restart' }), 3000);
 
   // ---------- phone alerts (ntfy) ----------
   const phoneCfg = () => ctx.settings().alerts || {};
@@ -120,7 +135,8 @@ module.exports = function health(ctx) {
   function equipmentItem(d) {
     const s = d.state || {};
     const base = { group: 'Equipment', id: d.id, label: nameOf(d) };
-    if (d.type === 'osc') return { ...base, state: 'info', detail: 'Messages are sent without a reply, so this one can\'t be checked from here.' };
+    // equipment that only listens (OSC, DMX, button boxes) never answers, so there's nothing to check
+    if (d.type === 'osc' || d.constructor.meta?.oneWay) return { ...base, state: 'info', detail: 'Messages are sent without a reply, so this one can\'t be checked from here.' };
     if (d.status !== 'online') return { ...base, state: 'error', detail: d.status === 'connecting' ? 'Trying to connect, no answer yet.' : 'Not answering. Check it is switched on and plugged into the show network.' };
     if (Date.now() - d.lastSeen > FRESH_MS) return { ...base, state: 'warn', detail: `Connected, but last heard from ${ago(Date.now() - d.lastSeen)} ago.` };
     const bits = [];
@@ -181,7 +197,7 @@ module.exports = function health(ctx) {
   async function preshowCheck(who) {
     // Give anything that is still connecting a few seconds to answer before judging it.
     for (let i = 0; i < 10 && [...devices.values()].some(d => d.status === 'connecting'); i++) await new Promise(r => setTimeout(r, 500));
-    const items = [...[...devices.values()].filter(d => !d.virtual).map(equipmentItem), ...showItems(), ...computerItems()];
+    const items = [...[...devices.values()].filter(isGear).map(equipmentItem), ...showItems(), ...computerItems()];
     for (const extra of ctx.checks) try { items.push(...(await extra())); } catch (e) { items.push({ group: 'This computer', state: 'warn', label: 'Check', detail: e.message }); }
     const count = k => items.filter(i => i.state === k).length;
     lastCheck = { at: Date.now(), by: who, items, errors: count('error'), warnings: count('warn') };
@@ -205,7 +221,7 @@ module.exports = function health(ctx) {
   ctx.handlers['health-get'] = async () => ({ ...healthInfo(), phone: await phoneInfo() });
   ctx.handlers['alerts-phone'] = m => setPhone(m.on);
   ctx.handlers['alerts-test'] = () => push({ level: 'warn', msg: 'Test alert from Show Control. Phone alerts are working.' }, true);
-  ctx.initExtras.push(() => ({ alerts: [...active.values()], lastCheck }));
+  ctx.initExtras.push(() => ({ lastCheck }));
   ctx.alert = raise;
   return { raise, preshowCheck };
 };

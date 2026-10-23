@@ -16,7 +16,7 @@ module.exports = function access(ctx) {
   // Requests a viewer may make (read-only). Other features add theirs with ctx.access.viewerMay(type).
   const viewerOk = new Set(['health-get', 'preshow-check', 'versions-list', 'backups-get']);
   // Requests only an admin may make.
-  const adminOnly = new Set(['setup-get', 'setup-test', 'setup-save', 'autostart', 'alerts-phone', 'access-get', 'access-set', 'backups-set', 'backups-browse']);
+  const adminOnly = new Set(['setup-get', 'setup-test', 'setup-discover', 'setup-save', 'autostart', 'alerts-phone', 'access-get', 'access-set', 'backups-set', 'backups-browse']);
 
   ctx.access = {
     required: () => { const p = pins(); return !!(p.admin || p.operator || p.viewer); },

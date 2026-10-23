@@ -8,8 +8,8 @@ const fs = require('fs');
 const BLOCKED = {
   'save-cues': 'edit the cue list', 'versions-restore': 'restore an earlier cue list', 'cues-undo': 'undo cue list changes',
   'backups-restore-cues': 'restore a cue list from a backup', 'setup-save': 'change the equipment setup', autostart: 'change start-up settings',
-  'access-set': 'change PINs', jump: 'jump to another cue', 'house-set': 'change the house lights setup', 'eos-import': 'edit the cue list',
-  'chancheck-start': 'start a channel check',
+  'save-mics': 'change the mic plot', 'access-set': 'change PINs', jump: 'jump to another cue',
+  'house-set': 'change the house lights setup', 'eos-import': 'edit the cue list', 'chancheck-start': 'start a channel check',
 };
 
 module.exports = function lock(ctx) {

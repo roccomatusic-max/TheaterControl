@@ -11,7 +11,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showctl-tools-'));
 const file = path.join(tmp, 'show.json');
-const env = { ...process.env, PORT: '18089', SHOW_SAVE_PATH: file, SHOW_STATE_FILE: path.join(tmp, 'state.json'), SHOW_QUIET: '1' };
+const env = { ...process.env, PORT: '18089', SHOW_SAVE_PATH: file, SHOW_STATE_FILE: path.join(tmp, 'state.json'), SHOW_QUIET: '1', SHOW_ALERT_GRACE_MS: '1000', SHOW_ALERT_BATCH_MS: '300' };
 const root = path.join(__dirname, '..');
 let server, sims;
 
@@ -115,9 +115,16 @@ let server, sims;
   assert.match((await ask({ t: 'jump', index: 0 })).error, /locked/i, 'no jumping while the show is locked');
   await ask({ t: 'show-lock', on: false });
 
+  // The equipment drops out for a moment (the sims stop and start again): the report says so.
+  sims.kill(); await wait(2500);
+  sims = spawn(process.execPath, ['-e', "require('./sim/devices')"], { cwd: root, env, stdio: 'ignore' });
+  await wait(6000);
+
   // The rehearsal (with a jump) becomes a rehearsal report, made by hand.
   r = await ask({ t: 'report-now' });
   assert.match(r.name, /Rehearsal report$/);
+  const problems = (await ask({ t: 'report-link', name: r.name })).summary.problems.map(x => x.text).join(' | ');
+  assert.match(problems, /Eos stopped answering\. Back after/, 'the drop-out and the recovery are in the report');
   const timing = await ask({ t: 'report-timing' });
   assert.equal(Object.keys(timing.at).length, n, 'scene map timing from the full show');
 

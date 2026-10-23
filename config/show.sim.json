@@ -33,6 +33,13 @@
             "args": {
               "closed": true
             }
+          },
+          {
+            "device": "mics",
+            "cmd": "scene",
+            "args": {
+              "scene": "pre"
+            }
           }
         ]
       },
@@ -110,6 +117,13 @@
             "args": {
               "closed": false
             }
+          },
+          {
+            "device": "mics",
+            "cmd": "scene",
+            "args": {
+              "scene": "pre"
+            }
           }
         ]
       },
@@ -144,6 +158,13 @@
             "cmd": "preset",
             "args": {
               "preset": 3
+            }
+          },
+          {
+            "device": "mics",
+            "cmd": "scene",
+            "args": {
+              "scene": "1-1"
             }
           }
         ]
@@ -226,6 +247,13 @@
             "args": {
               "closed": false
             }
+          },
+          {
+            "device": "mics",
+            "cmd": "scene",
+            "args": {
+              "scene": "1-2"
+            }
           }
         ]
       },
@@ -256,6 +284,13 @@
             "cmd": "start",
             "args": {
               "cue": "7"
+            }
+          },
+          {
+            "device": "mics",
+            "cmd": "scene",
+            "args": {
+              "scene": "1-1"
             }
           }
         ]
@@ -345,6 +380,22 @@
       "port": 14928,
       "channels": 32,
       "dcas": 8
+    },
+    {
+      "id": "rx1",
+      "type": "shure",
+      "name": "Mic receiver 1",
+      "host": "127.0.0.1",
+      "port": 12202,
+      "channels": 4
+    },
+    {
+      "id": "rx2",
+      "type": "shure",
+      "name": "Mic receiver 2",
+      "host": "127.0.0.1",
+      "port": 12203,
+      "channels": 4
     },
     {
       "id": "cam1",
@@ -482,5 +533,148 @@
         ]
       }
     ]
+  },
+  "mics": {
+    "packs": [
+      {
+        "id": "1",
+        "name": "Pack 1",
+        "actor": "Sam",
+        "mixer": "tf5",
+        "channel": 0,
+        "receiver": "rx1",
+        "rxChannel": 1
+      },
+      {
+        "id": "2",
+        "name": "Pack 2",
+        "actor": "Jo",
+        "mixer": "tf5",
+        "channel": 1,
+        "receiver": "rx1",
+        "rxChannel": 2
+      },
+      {
+        "id": "3",
+        "name": "Pack 3",
+        "actor": "Priya",
+        "mixer": "tf5",
+        "channel": 2,
+        "receiver": "rx1",
+        "rxChannel": 3
+      },
+      {
+        "id": "4",
+        "name": "Pack 4",
+        "actor": "Marcus",
+        "mixer": "tf5",
+        "channel": 3,
+        "receiver": "rx1",
+        "rxChannel": 4
+      },
+      {
+        "id": "5",
+        "name": "Pack 5",
+        "actor": "Lena",
+        "mixer": "tf5",
+        "channel": 4,
+        "receiver": "rx2",
+        "rxChannel": 1
+      },
+      {
+        "id": "6",
+        "name": "Pack 6",
+        "actor": "Theo",
+        "mixer": "tf5",
+        "channel": 5,
+        "receiver": "rx2",
+        "rxChannel": 2
+      },
+      {
+        "id": "7",
+        "name": "Pack 7",
+        "actor": "Ava",
+        "mixer": "tf5",
+        "channel": 6,
+        "receiver": "rx2",
+        "rxChannel": 3
+      },
+      {
+        "id": "8",
+        "name": "Pack 8",
+        "actor": "Kai",
+        "mixer": "tf5",
+        "channel": 7,
+        "receiver": "rx2",
+        "rxChannel": 4
+      }
+    ],
+    "scenes": [
+      {
+        "id": "pre",
+        "name": "Preshow (all off)",
+        "live": []
+      },
+      {
+        "id": "1-1",
+        "name": "1-1 Opening",
+        "live": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "1-2",
+        "name": "1-2 Duet",
+        "live": [
+          "1",
+          "2"
+        ]
+      },
+      {
+        "id": "1-3",
+        "name": "1-3 Street scene",
+        "live": [
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ],
+        "wearers": {
+          "5": "Mia (swing)"
+        }
+      },
+      {
+        "id": "bows",
+        "name": "Bows",
+        "live": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      }
+    ],
+    "lowBatteryBars": 1
+  },
+  "sound": {
+    "feedback": {
+      "enabled": true,
+      "minDb": -12,
+      "holdMs": 1000,
+      "steadyDb": 3
+    }
   }
 }

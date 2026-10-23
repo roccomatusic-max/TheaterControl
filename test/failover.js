@@ -83,6 +83,7 @@ async function until(what, fn, ms = 10000) {
   backup = await connect('backup');
   assert.ok(backup.init.failover.active, 'backup is running the show');
   assert.equal(backup.show.index, 2, 'same cue position');
+  assert.ok(backup.init.alerts.some(a => a.key === 'failover' && /taken over/.test(a.title)), 'the takeover shows on the alert bar');
   await until('backup connected to the equipment', () => backup.devices.eos?.status === 'online' && backup.devices.tf5?.status === 'online');
   backup.send({ t: 'show', action: 'go' });
   await until('GO on the backup', () => backup.show.index === 3);

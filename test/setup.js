@@ -47,6 +47,12 @@ async function connect(expectMode, pin) {
     assert.ok(info.supervised, 'launcher marks the server as supervised');
     assert.ok(info.devices.length >= 5 && info.devices.every(d => d.host === '' && !d.port), 'starts from the practice gear with blank addresses');
     assert.ok(info.devices.find(d => d.type === 'panasonic').username, 'keeps non-secret settings');
+    // First time: the iPad is offered the guided set-up, with the Add equipment list and cue commands for every kind.
+    assert.equal(c.init.firstRun, true);
+    assert.ok(c.init.cueCommands.catalog.x32 && c.init.cueCommands.catalog.resolume, 'cue commands for newer drivers and brands');
+    assert.ok(info.profiles.length >= 50 && info.categories.length && info.types.dmx, 'Add equipment list');
+    const found = await c.ask({ t: 'setup-discover', devices: [] });
+    assert.ok(Array.isArray(found.found), JSON.stringify(found));
 
     // Connection tests: a real (simulated) Eos answers; a closed port and a dead address are explained.
     const ok = await c.ask({ t: 'setup-test', device: { id: 'eos', type: 'eos', host: '127.0.0.1', port: 13037 } });
@@ -81,6 +87,7 @@ async function connect(expectMode, pin) {
     c.ws.close();
     await connect('locked'); // live mode asks for the PIN set on the Setup screen
     c = await connect('live', '2468');
+    assert.equal(c.init.firstRun, false, 'no guided set-up once there is a real show');
     assert.equal((await c.ask({ t: 'setup-get' })).pin, '2468');
     assert.equal(c.init.show.name, 'Into the Woods');
     assert.ok(!c.init.devices.some(d => d.id === 'tf5'), 'equipment without an address is left out');

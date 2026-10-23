@@ -11,8 +11,24 @@ and used from an iPad or phone in a browser. It works with no internet.
 | PTZ cameras | VISCA-over-IP (UDP 52381) or raw VISCA TCP (5678) | Joystick pan/tilt, zoom, focus, presets (tap = recall, hold = store), tally, home, power |
 | Camera video | go2rtc / MediaMTX → WebRTC, or MJPEG/HLS | Live view on the iPad, low latency |
 | Panasonic projectors (PT-DZ13K, PT-DZ770 series) | Panasonic LAN protocol, TCP 1024 (+ PJLink for health) | Power with confirmation, shutter, inputs, lamp hours, fan/lamp/temperature health, lens home |
+| Shure ULX-D, QLX-D, SLX-D, Axient Digital receivers | Shure text protocol, TCP 2202 | Pack battery (bars + time left), signal, whether a pack is switched on |
 | Any PJLink projector / display | PJLink class 1, TCP 4352 | Power, shutter, inputs, lamp hours, health, make/model |
-| Anything else | Generic OSC out | Resolume, Millumin, Companion, TouchDesigner… |
+| grandMA2 / grandMA3 | Telnet (MA2) / OSC (MA3) command line | GO, go to cue, back, off, macros, any command line |
+| ChamSys MagicQ | OSC over UDP | Playback GO, stop, release, jump to cue, level |
+| Behringer X32 / Midas M32 / X Air / MR | OSC over UDP 10023 / 10024 | Faders and on/off, two-way, scene/snapshot recall (same cue steps as the TF) |
+| Yamaha CL / QL / RIVAGE / DM7 | Same protocol as the TF | As TF; scene recall from the one scene list |
+| Allen & Heath SQ / Qu / Avantis / dLive | MIDI over TCP | Scene recall, raw MIDI |
+| Panasonic PTZ cameras (AW-UE, AW-HE) | HTTP CGI | Same as the VISCA cameras |
+| Haze, fog, LED, anything DMX | sACN (E1.31) or Art-Net out | Levels with fades, raw values |
+| Anything with MIDI | RTP-MIDI (Apple Network MIDI / rtpMIDI) | MIDI Show Control, notes, CC, program change |
+| 700+ other kinds of gear | Bitfocus Companion (HTTP) | Press any Companion button from a cue: ATEM, Avolites, Hog, DiGiCo, vMix… |
+| Anything else | OSC, text over TCP/UDP, HTTP | With ready-made commands for Resolume, Millumin, HyperDeck, Videohub, Watchout, Shelly |
+
+**Setting it up from the iPad:** System > Guided set-up walks through it one step at a time.
+"Find equipment on the network" asks the show network what's there (PJLink, Panasonic, Yamaha,
+X32, Art-Net consoles and nodes, Sony-style cameras, QLab, Companion, HyperDeck...), and
+"Add equipment" has 50+ makes and models with what to press on each one.
+New kinds of equipment can be added as plugins without changing the app: see [plugins/README.md](plugins/README.md).
 
 **Show cues** tie it together: one GO can fire an Eos cue, a QLab cue, a TF scene and camera
 presets, with optional per-action delays. There are also show/act timers, a lock button so a
@@ -121,18 +137,40 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 - Turn off automatic OS updates and sleep on the server during the run.
 - If the TF5 carries Dante, keep Dante on its own network or VLAN.
 
+## Sound and mics
+
+- **Level meters**: the Sound tab shows a live meter beside every input fader. They come from the TF5 at
+  10 updates a second. (The meter request, `mtrstart MIXER:Current/Meter/InCh 100`, still has to be checked on the
+  real desk. If the desk refuses it, the app says "meters not available" and everything else carries on.
+  `"meterPath"` and `"meterMs"` on the mixer override it.)
+- **Feedback alert**: a channel that holds a steady tone above -12 dB for a second raises a red alert on every
+  iPad and phone, with a one-tap mute for that channel. Singing moves around too much to trip it, but a long
+  held note into a hot mic can. Tune or turn it off with `"sound": { "feedback": { "enabled": true, "minDb": -12, "holdMs": 1000, "steadyDb": 3 } }`.
+- **Mics tab: mic plot**: every radio mic pack with who wears it, its mixer channel (live/off), meter, battery
+  and signal. Scenes say which packs are live (and who wears a pack when a cover or swap has it). Tapping a scene,
+  or a show cue with "Switch mics to scene", turns each pack's channel on or off on the TF5 to match. A low pack
+  battery raises an alert naming the actor.
+- **Mic check**: steps through the packs one at a time with a big meter. It ticks "heard on the desk" by itself
+  when the mic comes through, and you mark each one Good or Problem.
+- Packs and scenes are edited on the iPad (Mics → Edit packs & scenes) and saved in the show file under `"mics"`.
+  Receivers are added on System → Equipment setup.
+
+<p><img src="docs/screenshots/ipad-mics.png" width="70%" alt="Mics tab on iPad: mic scene, packs with meters and batteries, feedback alert"></p>
+
 ## Health, alerts and the pre-show check
 
 - **Pre-show check** (System > Pre-show check): one button tests every piece of equipment, the cue list
   (standby at the top, timers at zero, cues that use equipment with no address) and this computer
   (disk space). Each line is green, amber or red, with a one-tap fix where there is an obvious one.
 - **Ready dots**: every cue in the list has a dot that is green when all the equipment it uses is answering.
-- **Alerts**: if something that was working stops answering for 5 seconds, every screen shows a banner
-  (and beeps, where the browser allows sound). It clears when the equipment answers again. Tap the
-  status dots at the top to see how long each device has been up and how often it dropped out.
+- **Alerts**: one alert bar on every screen (with a beep, where the browser allows sound) for equipment
+  that was working and stopped answering for 5 seconds, the emergency stop, possible feedback and low
+  mic batteries (see Sound and mics). Equipment alerts clear when it answers again; several at once
+  become one line. Tap the status dots at the top to see how long each device has been up and how
+  often it dropped out.
 - **Phone alerts**: turn them on in the Health screen and subscribe to the private channel name in the free
-  [ntfy](https://ntfy.sh) app. Equipment drop-outs, the emergency stop and an unexpected restart of
-  Show Control reach the phone even when the app is closed. Alerts that happen together are sent as
+  [ntfy](https://ntfy.sh) app. Equipment drop-outs, the emergency stop, possible feedback, low mic batteries and an
+  unexpected restart of Show Control reach the phone even when the app is closed. Alerts that happen together are sent as
   one message. The show computer needs internet for this (the control network). Settings are in the
   show file: `"alerts": { "on": true, "ntfyTopic": "…", "ntfyServer": "https://ntfy.sh" }`.
 
@@ -292,13 +330,18 @@ For recording or streaming the show, OBS on the server can take the same feeds.
 server/index.js          HTTP + WebSocket hub, show cue stack, timers, PIN, log
 server/features/*.js     self-contained features (health, …) that plug into index.js through ctx
 server/drivers/*.js      one driver per device type; each exposes status, state, command()
+server/catalog.js        the "Add equipment" list: makes/models → driver, defaults, set-up steps
+server/discover.js       "Find equipment on the network"
+server/plugins.js        loads extra drivers from plugins/ and ~/Show Control/plugins/
 server/lib/osc.js        OSC encode/decode + SLIP framing (no dependencies)
 public/                  the iPad/phone app (plain JS/CSS, no build step, no CDN)
 sim/                     protocol-accurate fake devices
 config/*.json            device list, show cues, UI layout
 ```
 
-Adding a device type means adding one file in `server/drivers/` and one line in `drivers/index.js`.
+Adding a device type means adding one file in `server/drivers/` and one line in `drivers/index.js`
+(or dropping a plugin file in `plugins/`). Adding another brand of something already supported is
+one line in `server/catalog.js`.
 
 Adding a feature means one file in `server/features/` (it gets `ctx`: devices, show, log, broadcast,
 settings, and `handlers` for extra WebSocket requests), plus a script in `public/` that uses the
@@ -308,6 +351,6 @@ extension points at the top of `public/app.js` (`VIEWS`, `SYS_CARDS`, `onMsg`, `
 
 - Projection mapping (shared with Projector Control's mapping module)
 - Cue editor in the UI (today cues are edited in `config/show.json`)
-- MIDI Show Control / MIDI timecode out (USB MIDI interface on the server)
-- LTC/MTC display and chase, Clear-Com/Green-GO comms status, Stream Deck via Bitfocus Companion
+- MIDI timecode out
+- LTC/MTC display and chase, Clear-Com/Green-GO comms status
 - Backstage and front-of-house paging through QLab
