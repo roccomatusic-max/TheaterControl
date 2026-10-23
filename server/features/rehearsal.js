@@ -5,6 +5,7 @@
 //   mixer      the last scene, then any level and on/off changes after it
 //   cameras    the last preset, power and tally
 //   projectors the last power, shutter, input and freeze
+//   house      the last look or level
 // Anything it can't safely repeat (macros, command lines, unknown equipment) is listed, not run.
 const STATEFUL = {
   'yamaha-tf': { scene: () => 'scene', level: a => `level:${a.args?.strip}:${a.args?.index}`, on: a => `on:${a.args?.strip}:${a.args?.index}` },
@@ -12,6 +13,7 @@ const STATEFUL = {
   panasonic: { power: () => 'power', shutter: () => 'shutter', input: () => 'input', freeze: () => 'freeze' },
   pjlink: { power: () => 'power', shutter: () => 'shutter', input: () => 'input' },
   eos: { sub: a => `sub:${a.args?.sub}`, chan: a => `chan:${a.args?.chan}` },
+  house: { houseLook: () => 'level', houseLevel: () => 'level' },
 };
 const IGNORE = { ptz: ['move', 'zoom', 'focus', 'store'], panasonic: ['lensHome'], qlab: ['go', 'stop', 'pause', 'resume', 'next', 'previous', 'playhead', 'start', 'panic'] };
 
@@ -55,7 +57,12 @@ module.exports = function rehearsal(ctx) {
       const first = snap ? { device: id, cmd: 'cmdline', args: { text: `Go_To_Cue ${list}/${cue} Time 0#` } } : e.cue;
       steps.push({ dept: 'lx', text: `${nameOf(id)}: cue ${list}/${cue}${snap ? ' with no fade' : ''}${e.gos ? `, then GO ×${e.gos}` : ''}`, actions: [first, ...Array(e.gos).fill({ device: id, cmd: 'go' })], sequence: true });
     }
-    for (const [id, st] of state) for (const x of st.values()) steps.push({ dept: ctx.depts?.deptOf(id), text: actionWords(x), actions: [x] });
+    for (const [id, st] of state) {
+      for (const x of st.values()) {
+        const snapped = snap && typeOf(id) === 'house' ? { ...x, args: { ...x.args, fade: 0 } } : x; // house lights snap with the lighting
+        steps.push({ dept: ctx.depts?.deptOf(id), text: actionWords(x), actions: [snapped] });
+      }
+    }
     // Sound doesn't "track": fade out what is playing and line QLab up with the next sound cue.
     for (const d of [...ctx.devices.values()].filter(d => d.type === 'qlab')) {
       let next = null;
@@ -80,6 +87,8 @@ module.exports = function rehearsal(ctx) {
       case 'tally': return `${n}: tally ${x.on ? 'on' : 'off'}`;
       case 'sub': return `${n}: sub ${x.sub} at ${Math.round(Number(x.level) * 100)}%`;
       case 'chan': return `${n}: channel ${x.chan} at ${x.level}`;
+      case 'houseLook': return `${n}: ${ctx.house?.look(x.look)?.name || x.look}`;
+      case 'houseLevel': return `${n}: ${x.level}%`;
       default: return `${n}: ${a.cmd}`;
     }
   }

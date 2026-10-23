@@ -181,7 +181,7 @@ module.exports = function health(ctx) {
   async function preshowCheck(who) {
     // Give anything that is still connecting a few seconds to answer before judging it.
     for (let i = 0; i < 10 && [...devices.values()].some(d => d.status === 'connecting'); i++) await new Promise(r => setTimeout(r, 500));
-    const items = [...[...devices.values()].map(equipmentItem), ...showItems(), ...computerItems()];
+    const items = [...[...devices.values()].filter(d => !d.virtual).map(equipmentItem), ...showItems(), ...computerItems()];
     for (const extra of ctx.checks) try { items.push(...(await extra())); } catch (e) { items.push({ group: 'This computer', state: 'warn', label: 'Check', detail: e.message }); }
     const count = k => items.filter(i => i.state === k).length;
     lastCheck = { at: Date.now(), by: who, items, errors: count('error'), warnings: count('warn') };

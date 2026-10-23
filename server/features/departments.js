@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DEPTS = [
-  { id: 'lx', name: 'Lighting', types: ['eos', 'grandma', 'magicq', 'dmx'] },
+  { id: 'lx', name: 'Lighting', types: ['eos', 'grandma', 'magicq', 'dmx', 'house'] },
   { id: 'snd', name: 'Sound', types: ['qlab', 'yamaha-tf', 'x32', 'allen-heath', 'shure', 'mics'] },
   { id: 'proj', name: 'Projection', types: ['panasonic', 'pjlink'] },
   { id: 'cam', name: 'Cameras', types: ['ptz', 'panasonic-cam', 'camera'] },
@@ -32,8 +32,10 @@ module.exports = function departments(ctx) {
   const actionsFor = (cue, dept) => (cue?.actions || []).filter(a => deptOf(a.device) === dept);
   const nextFor = (dept, from) => { for (let j = Math.max(0, from); j < ctx.show.cues.length; j++) if (actionsFor(ctx.show.cues[j], dept).length) return j; return null; };
   const name = id => DEPTS.find(x => x.id === id)?.name || id;
+  // equipment in the show file, plus equipment made by a feature (the house lights)
+  const ids = () => [...new Set([...ctx.cfg.devices.map(d => d.id), ...ctx.devices.keys()])];
   const info = () => ({
-    list: DEPTS.map(x => ({ id: x.id, name: x.name, devices: ctx.cfg.devices.filter(d => deptOfDevice(d.id) === x.id).map(d => d.id) })),
+    list: DEPTS.map(x => ({ id: x.id, name: x.name, devices: ids().filter(id => deptOfDevice(id) === x.id) })),
     split: Object.fromEntries(Object.entries(split).map(([k, v]) => [k, { ...v, next: nextFor(k, v.index) }])),
   });
   const publish = () => { persist(); ctx.broadcast({ t: 'depts', depts: info() }); };

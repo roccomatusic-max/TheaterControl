@@ -224,6 +224,27 @@ Set up on System > Buttons, MIDI and timecode.
 Buttons, OSC and MIDI go through the same checks as an operator's screen: the show lock applies, and
 a backup computer on standby ignores them.
 
+## Lighting: house lights, the console's cue list, channel check
+
+- **House lights**: set up on System > House lights. They can be a submaster on the Eos (faded
+  smoothly from here), channels on the Eos (`Chan 501 Thru 504 At 40 Time 5`), one Eos macro per
+  look, or their own DMX box (a "DMX over the network" device). Four looks (Full, Preshow, Half, Out)
+  with your own levels, buttons on the Show and Lighting tabs, and a "House lights" step for any cue.
+  Optionally, holding STOP brings them to Full. The rehearsal jump puts them where the cue list left
+  them.
+- **Cue list on the console** (Lighting tab): the Eos cue list read from the console, with labels,
+  times, follows, scenes and notes, the live cue in green and the next in yellow. Tap a cue for its
+  details, to fire it, or to add it to the show's cue list; "Add cues to the show's cue list" adds
+  several at once, each in its place. The pre-show check warns when a show cue fires a lighting cue
+  the console doesn't have.
+- **Channel check** (Lighting tab, made for a phone): each channel comes on by itself at 50%, 75% or
+  Full. Tap OK or Problem (lamp out, wrong colour, focus…) and the next one comes on. Labels, fixture
+  types and gels come from the Eos patch. At the end every channel goes back to how the console had
+  it. Problems stay on a "To fix" list and in the pre-show check until marked fixed.
+
+Not yet tried on a real console: reading the cue list and patch over OSC, `Time` on a channel level,
+and the console's "cues changed" notices. The simulator answers the way the Eos documentation says.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:

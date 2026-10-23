@@ -299,7 +299,7 @@ const ctx = {
     writeJson(SETTINGS_PATH, { ...cur, ...patch });
   },
 };
-for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report', 'remote']) require(`./features/${f}`)(ctx);
+for (const f of ['health', 'access', 'lock', 'versions', 'backups', 'failover', 'screens', 'departments', 'rehearsal', 'report', 'remote', 'house', 'eoscues', 'chancheck']) require(`./features/${f}`)(ctx);
 
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.

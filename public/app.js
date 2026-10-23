@@ -24,6 +24,7 @@ const NAV_PARENT = { edit: 'show', setup: 'sys' }; // sub-screens light up their
 const SYS_CARDS = [];   // () => element, shown on the System tab
 const SHOW_BUTTONS = []; // () => element, buttons next to "Edit cues" on the Show tab
 const STANDBY_EXTRAS = []; // (show) => element or null, extra lines in the standby box
+const LX_CARDS = [];     // (eos device or undefined) => element or null, cards on the Lighting tab
 const msgHandlers = {}; // message type → [fn(msg)], called before the built-in handling
 const onMsg = (t, fn) => (msgHandlers[t] ||= []).push(fn);
 const onDevice = (id, fn) => { (updaters[id] ||= []).push(fn); if (S.devices[id]) fn(S.devices[id]); };
@@ -245,7 +246,7 @@ function eosStatus(id) {
 }
 function lxTab() {
   const eos = byType('eos')[0];
-  if (!eos) return h('div', { class: 'card' }, 'No Eos console configured.');
+  if (!eos) return h('div', { class: 'grid' }, h('div', { class: 'card' }, 'No Eos console configured.'), LX_CARDS.map(f => f()));
   const cueIn = h('input', { inputmode: 'decimal', placeholder: 'Cue', style: 'width:90px' });
   const chanIn = h('input', { inputmode: 'numeric', placeholder: 'Chan', style: 'width:80px' });
   const lvlIn = h('input', { inputmode: 'numeric', placeholder: '@ %', style: 'width:70px' });
@@ -264,7 +265,8 @@ function lxTab() {
         h('button', { onclick: () => chanIn.value && cmd(eos.id, 'chan', { chan: chanIn.value, level: 'Out' }) }, 'Out')),
       cmdline),
     h('div', { class: 'card' }, h('h3', {}, 'Quick buttons'),
-      h('div', { class: 'row' }, (S.ui.eosQuick || []).map(q => h('button', { onclick: () => cmd(eos.id, q.cmd, q.args) }, q.label)))));
+      h('div', { class: 'row' }, (S.ui.eosQuick || []).map(q => h('button', { onclick: () => cmd(eos.id, q.cmd, q.args) }, q.label)))),
+    LX_CARDS.map(f => f(eos)));
 }
 function statusPill(id) {
   const p = h('span', { class: 'pill' });
