@@ -13,7 +13,7 @@ const CACHE = path.join(ROOT, '.cache', 'node');
 const version = require('../package.json').version;
 const sh = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts });
 
-const APP_FILES = ['server', 'public', 'sim', 'config', 'launcher', 'deploy', 'package.json', 'package-lock.json', 'README.md'];
+const APP_FILES = ['server', 'public', 'sim', 'config', 'launcher', 'deploy', 'plugins', 'package.json', 'package-lock.json', 'README.md'];
 
 let sums;
 function download(file) {

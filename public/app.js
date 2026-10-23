@@ -20,7 +20,7 @@ const updaters = {}; // device id → [fn(snapshot)]
 // Extension points for the other files (setup.js, health.js, …): extra screens, extra cards on the
 // System tab, and handlers for extra server messages.
 const VIEWS = {};       // tab name → () => element
-const NAV_PARENT = { edit: 'show', setup: 'sys' }; // sub-screens light up their parent tab
+const NAV_PARENT = { edit: 'show', setup: 'sys', wizard: 'sys' }; // sub-screens light up their parent tab
 const SYS_CARDS = [];   // () => element, shown on the System tab
 const SHOW_BUTTONS = []; // () => element, buttons next to "Edit cues" on the Show tab
 const STANDBY_EXTRAS = []; // (show) => element or null, extra lines in the standby box
@@ -66,6 +66,10 @@ function handle(m) {
     $('#pin').hidden = true;
     S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || []; S.crew = m.crew;
     S.mode = m.mode; setConn(true);
+    S.alerts = m.alerts || []; renderAlerts();
+    addCueCommands(m.cueCommands);
+    // first time in practice mode with no real show yet: start the guided set-up (once per iPad)
+    if (m.firstRun && !localStorage.getItem('wizardSeen') && !['wizard', 'setup'].includes(S.tab)) { S.tab = 'wizard'; S.setup = null; }
     if (S.setup?.restarting) S.setup = null; // back after a practice/live switch: reload the equipment list
     S.clockSkew = m.show.now - Date.now();
     $('#showName').textContent = m.show.name;
@@ -77,6 +81,8 @@ function handle(m) {
     (updaters.__anyDevice || []).forEach(fn => fn());
     renderDots();
   } else if (m.t === 'show') { S.show = m.show; S.clockSkew = m.show.now - Date.now(); renderEmergency(); (updaters.__show || []).forEach(fn => fn(S.show)); }
+  else if (m.t === 'meters') { (S.meters ||= {})[m.device] = m.levels; (updaters.__meters || []).forEach(fn => fn(m.device)); }
+  else if (m.t === 'alerts') { S.alerts = m.alerts; renderAlerts(); }
   else if (m.t === 'crew') S.crew = m.crew;
   else if (m.t === 'saved') { pending[m.id]?.(true); delete pending[m.id]; }
   else if (m.t === 'reply') { pending[m.id]?.(m.data); delete pending[m.id]; }
@@ -103,7 +109,7 @@ function toast(msg, ms = 2500) { const t = $('#toast'); t.textContent = msg; t.c
 
 // ---------- chrome ----------
 function renderDots() {
-  $('#statusDots').replaceChildren(...Object.values(S.devices).map(d => h('div', { class: `dot ${d.status}`, title: `${d.name}: ${d.status}` }, h('i'), h('span', {}, d.name.split(' · ')[0]))));
+  $('#statusDots').replaceChildren(...Object.values(S.devices).filter(d => d.type !== 'mics').map(d => h('div', { class: `dot ${d.status}`, title: `${d.name}: ${d.status}` }, h('i'), h('span', {}, d.name.split(' · ')[0]))));
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; localStorage.setItem('tab', S.tab); render(); }));
 const lockBtn = $('#lockBtn');
@@ -150,7 +156,7 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (NAV_PARENT[S.tab] || S.tab)));
   renderDots();
   const main = $('#main');
-  const view = VIEWS[S.tab] || ({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab })[S.tab] || showTab;
+  const view = VIEWS[S.tab] || ({ show: showTab, edit: editTab, lx: lxTab, snd: sndTab, mics: micsTab, proj: projTab, cam: camTab, sys: sysTab, setup: setupTab, wizard: wizardTab })[S.tab] || showTab;
   main.replaceChildren(view());
 }
 
@@ -159,6 +165,7 @@ const fmtDur = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s /
 function actionText(a) {
   const grp = String(a.device).startsWith('group:') && S.groups.find(g => g.id === a.device.slice(6));
   const d = grp ? grp.name : S.devices[a.device]?.name?.split(' · ')[0] || a.device, x = a.args || {};
+  if (ACTION_TEXT[kindOf(a.device)]) return `${ACTION_TEXT[kindOf(a.device)](a)}${a.delay ? ` +${a.delay}s` : ''}`;
   const s = { cue: `Q${x.cue}`, start: `Q${x.cue}`, scene: `scene ${String(x.bank || 'a').toUpperCase()}${x.scene}`, preset: `preset ${x.preset}`, macro: `macro ${x.macro}`,
     shutter: x.closed ? 'shutter close' : 'shutter open', power: x.on ? 'power on' : 'power off', input: `input ${x.input}` }[a.cmd] || a.cmd;
   return `${d} ${s}${a.delay ? ` +${a.delay}s` : ''}`;
@@ -312,7 +319,7 @@ function fader(onMove) {
   return { el, set: p => { if (!dragging) place(p); } };
 }
 
-function strip(devId, kind, idx, getStrip) {
+function strip(devId, kind, idx, getStrip, meter) {
   const nm = h('div', { class: 'nm' }), db = h('div', { class: 'db' });
   const f = fader(p => { const d = posToDb(p); db.textContent = fmtDb(d); cmd(devId, 'level', { strip: kind, index: idx, db: d === -Infinity ? '-inf' : +d.toFixed(2) }); });
   const onBtn = h('button', { onclick: () => { const s = getStrip(S.devices[devId]); cmd(devId, 'on', { strip: kind, index: idx, on: !s.on }); } }, 'ON');
@@ -321,7 +328,7 @@ function strip(devId, kind, idx, getStrip) {
     nm.textContent = s.name; const v = rawToDb(s.level); db.textContent = fmtDb(v); f.set(dbToPos(v));
     onBtn.textContent = s.on ? 'ON' : 'OFF'; onBtn.className = s.on ? 'on' : 'muted';
   });
-  return h('div', { class: 'strip' }, nm, onBtn, f.el, db);
+  return h('div', { class: 'strip' }, nm, onBtn, meter ? h('div', { class: 'fm' }, f.el, meter) : f.el, db);
 }
 
 function sndTab() {
@@ -341,7 +348,7 @@ function sndTab() {
     out.append(
       h('div', { class: 'card' }, h('h3', {}, `${tf.name} · DCAs`, statusPill(tf.id)),
         h('div', { class: 'strips' }, dcas.map(i => strip(tf.id, 'dca', i, d => d.state.dcas[i])), strip(tf.id, 'master', 0, d => ({ ...d.state.master, name: 'ST' })))),
-      h('div', { class: 'card' }, h('h3', {}, `${tf.name} · Inputs`), h('div', { class: 'strips' }, chans.map(i => strip(tf.id, 'ch', i, d => d.state.channels[i])))),
+      h('div', { class: 'card' }, h('h3', {}, `${tf.name} · Inputs`, meterNote(tf.id)), h('div', { class: 'strips' }, chans.map(i => strip(tf.id, 'ch', i, d => d.state.channels[i], meterBar(tf.id, i))))),
       h('div', { class: 'card' }, h('h3', {}, 'Scene recall', last),
         h('div', { class: 'row', style: 'align-items:center' }, sceneIn,
           h('button', { onclick: () => sceneIn.value && confirm(`Recall scene A${sceneIn.value} on ${tf.name}?`) && cmd(tf.id, 'scene', { bank: 'a', scene: Number(sceneIn.value) }) }, 'Recall A'),
@@ -460,7 +467,21 @@ const CMD_LABEL = { cue: 'Fire cue', go: 'GO', back: 'Back', macro: 'Fire macro'
   start: 'Start cue', stop: 'Stop all', panic: 'Panic (fade out all)', pause: 'Pause all', resume: 'Resume all', playhead: 'Move playhead to',
   scene: 'Recall scene', level: 'Set fader', on: 'Fader on/off', preset: 'Go to preset', home: 'Home', tally: 'Tally light',
   shutter: 'Shutter', power: 'Power', input: 'Input', send: 'Send OSC' };
-const kindOf = id => String(id).startsWith('group:') ? 'projector' : PROJ_TYPES.includes(S.devices[id]?.type) ? 'projector' : S.devices[id]?.type;
+// Filled in by other screens (mics.js): dropdown choices for 'pick:<name>' fields, and how a kind of device's cue steps read.
+const PICKERS = {}, ACTION_TEXT = {};
+// Commands the server describes (newer drivers, plugins, brands with ready-made commands) are added to the list above.
+function addCueCommands(cc) {
+  if (!cc) return;
+  Object.assign(CATALOG, cc.catalog || {});
+  Object.assign(CMD_LABEL, cc.labels || {});
+}
+// The command list to use for a device: its brand's ready-made commands if it has some, else its driver's.
+const kindOf = id => {
+  if (String(id).startsWith('group:') || PROJ_TYPES.includes(S.devices[id]?.type)) return 'projector';
+  const d = S.devices[id];
+  return d?.profile && CATALOG[d.profile] ? d.profile : d?.type;
+};
+const cmdLabel = (kind, c) => CMD_LABEL[`${kind}:${c}`] || CMD_LABEL[`${kind}.${c}`] || CMD_LABEL[c] || c;
 const targets = () => [
   ...Object.values(S.devices).map(d => ({ id: d.id, label: d.name })),
   ...S.groups.map(g => ({ id: `group:${g.id}`, label: `Projectors: ${g.name}` })),
@@ -486,6 +507,7 @@ function field(a, [key, type, def, label], onChange) {
     input = opts.length ? h('select', { onchange: e => set(e.target.value) }, h('option', { value: '' }, 'Choose…'), opts.map(i => h('option', { value: i.code, selected: i.code === val }, i.label)))
       : h('input', { value: val, placeholder: 'e.g. HD1 or 31', onchange: e => set(e.target.value.trim()) });
   }
+  else if (type.startsWith('pick:')) input = h('select', { onchange: e => set(e.target.value) }, h('option', { value: '' }, 'Choose…'), PICKERS[type.slice(5)](a).map(o => h('option', { value: o.value, selected: String(o.value) === String(val) }, o.label)));
   else input = h('input', { inputmode: type === 'number' ? 'decimal' : 'text', value: val, onchange: e => set(type === 'number' ? Number(e.target.value) : e.target.value) });
   return h('label', {}, label, input);
 }
@@ -495,7 +517,7 @@ function actionEditor(a, list, i, redraw) {
     h('label', {}, 'Device', h('select', { onchange: e => { a.device = e.target.value; const c = Object.keys(CATALOG[kindOf(a.device)])[0]; a.cmd = c; a.args = defaultsFor(a.device, c); redraw(); } },
       targets().map(t => h('option', { value: t.id, selected: t.id === a.device }, t.label)))),
     h('label', {}, 'Do', h('select', { onchange: e => { a.cmd = e.target.value; a.args = defaultsFor(a.device, a.cmd); redraw(); } },
-      Object.keys(cmds).map(c => h('option', { value: c, selected: c === a.cmd }, CMD_LABEL[c] || c)))),
+      Object.keys(cmds).map(c => h('option', { value: c, selected: c === a.cmd }, cmdLabel(kind, c))))),
     h('div', { class: 'args' }, (cmds[a.cmd] || []).map(f => field(a, f, () => {})),
       h('label', {}, 'Delay (s)', h('input', { inputmode: 'decimal', value: a.delay || 0, onchange: e => (a.delay = Math.max(0, Number(e.target.value) || 0)) }))),
     h('div', { class: 'tools' },
@@ -653,7 +675,7 @@ function camCard(cam, expanded) {
   return card;
 }
 function camTab() {
-  const cams = byType('ptz');
+  const cams = [...byType('ptz'), ...byType('panasonic-cam')];
   if (!cams.length) return h('div', { class: 'card' }, 'No cameras configured.');
   S.camSel ||= cams[0].id;
   const tabs = h('div', { class: 'row', style: 'margin-bottom:10px' },
@@ -670,7 +692,7 @@ function sysTab() {
   log.append(...S.log.map(line));
   (updaters.__log ||= []).push(e => { const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20; log.append(line(e)); if (atBottom) log.scrollTop = log.scrollHeight; });
   setTimeout(() => (log.scrollTop = log.scrollHeight));
-  const devs = h('div', { class: 'kv' }, Object.values(S.devices).map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
+  const devs = h('div', { class: 'kv' }, Object.values(S.devices).filter(d => d.type !== 'mics').map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
   const screen = (href, name, what) => h('div', {}, h('a', { href, target: '_blank', style: 'color:#9cc4ff;font-weight:600' }, name), h('div', { class: 'dim', style: 'font-size:13px' }, what));
   const screens = h('div', { class: 'card' }, h('h3', {}, 'Stage manager and crew screens'),
     h('div', { style: 'display:grid;gap:10px' },

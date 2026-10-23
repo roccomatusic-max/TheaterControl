@@ -64,7 +64,9 @@ module.exports = function report(ctx) {
     go.results.push(...r.results.map(x => ({ name: String(x.name || x.device).split(' · ')[0], outcome: x.outcome, detail: x.detail })));
     save(); if (r.results.some(x => !GOOD.includes(x.outcome))) publish();
   });
-  ctx.events.on('alert', a => add({ t: 'alert', at: a.at, level: a.level, key: a.key, msg: a.msg }));
+  // Alerts on the alert bar (the emergency stop has its own line), and equipment coming back
+  ctx.events.on('alert', a => { if (a.kind !== 'emergency') add({ t: 'alert', at: a.at, level: a.level || (a.kind === 'feedback' ? 'error' : 'warn'), key: a.key, msg: a.detail ? `${a.title} (${a.detail})` : a.title }); });
+  ctx.events.on('alert-ok', a => { if (a.key !== 'emergency') add({ t: 'alert', at: a.at, level: 'ok', key: a.key, msg: a.msg }); });
   ctx.events.on('emergency', (who, results) => { if (!run) start(Date.now()); add({ t: 'emergency', at: Date.now(), by: ctx.screenName?.(who) || who, problems: (results || []).filter(r => !GOOD.includes(r.outcome)).map(r => `${String(r.name).split(' · ')[0]}: ${OUTCOME[r.outcome] || r.outcome}`) }); });
   ctx.events.on('emergency-cleared', who => add({ t: 'cleared', at: Date.now(), by: ctx.screenName?.(who) || who }));
   ctx.events.on('jump', j => { if (!run) start(j.at); run.lastMain = j.index - 1; add({ t: 'jump', at: j.at, by: j.who, i: j.target, label: ctx.show.cues[j.target]?.label, number: ctx.show.cues[j.target]?.number ?? j.target + 1, mode: j.mode, problems: j.problems }); });

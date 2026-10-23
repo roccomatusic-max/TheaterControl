@@ -66,6 +66,21 @@ function tfSim(port) {
   });
   p[key('MIXER:Current/St/Fader/Level', 0)] = 0; p[key('MIXER:Current/St/Fader/On', 0)] = 1;
   const clients = new Set();
+  // Input meters: speech-like bursts on the radio mics (ch 1-8), steadier band channels, silence when off.
+  // "simfeedback <ch>" (sim only) makes a channel ring with a steady tone for 3 s.
+  const ringing = new Map(), talking = Array.from({ length: 32 }, () => Math.random() < 0.5);
+  const meterByte = i => {
+    if (!p[key('MIXER:Current/InCh/Fader/On', i)] || p[key('MIXER:Current/InCh/Fader/Level', i)] <= -13800) return 0;
+    let db;
+    if ((ringing.get(i) || 0) > Date.now()) db = -6 + Math.random() * 0.5;
+    else if (i < 8) { if (Math.random() < 0.08) talking[i] = !talking[i]; db = talking[i] ? -28 + Math.random() * 18 : -62 + Math.random() * 6; }
+    else if (i < 20) db = -30 + Math.random() * 10;
+    else return 0;
+    return Math.max(1, Math.min(127, Math.round(127 + db * 2)));
+  };
+  setInterval(() => {
+    for (const c of clients) if (c.meters) c.write(`NOTIFY mtr MIXER:Current/Meter/InCh 2 ${Array.from({ length: 32 }, (_, i) => meterByte(i).toString(16).padStart(2, '0')).join(' ')}\n`);
+  }, 100);
   const fmt = (path, x, v) => `${path} ${x} 0 ${typeof v === 'string' ? `"${v}"` : v}`;
   net.createServer(sock => {
     clients.add(sock); sock.setEncoding('utf8'); let buf = '';
@@ -80,6 +95,8 @@ function tfSim(port) {
           p[key(path, x)] = v; sock.write(`OK set ${fmt(path, x, v)}\n`);
           for (const c of clients) if (c !== sock) c.write(`NOTIFY set ${fmt(path, x, v)}\n`);
         } else if (verb === 'devstatus') sock.write('OK devstatus runmode "normal"\n');
+        else if (verb === 'mtrstart') { sock.meters = true; sock.write(`OK mtrstart ${path} ${x}\n`); }
+        else if (verb === 'simfeedback') { ringing.set(Number(path), Date.now() + 3000); log('tf', `feedback on ch ${Number(path) + 1}`); sock.write('OK simfeedback\n'); }
         else if (verb === 'ssrecall_ex') { log('tf', `recall ${path} ${x}`); sock.write(`OK ssrecall_ex ${path} ${x}\n`); }
         else sock.write(`ERROR ${verb} UnknownCommand\n`);
       }
@@ -92,6 +109,40 @@ function tfSim(port) {
     p[key('MIXER:Current/InCh/Fader/Level', ch)] = v;
     for (const c of clients) c.write(`NOTIFY set MIXER:Current/InCh/Fader/Level ${ch} 0 ${v} "${(v / 100).toFixed(2)}"\n`);
   }, 7000);
+}
+
+// ---------- Shure wireless receiver (ULX-D style text over TCP) ----------
+// packs: [{ name, tx, bars, minutes }] per channel; tx null = no transmitter switched on.
+function shureSim(port, packs) {
+  const ch = packs.map(p => ({ ...p, rf: 100, audio: 20 }));
+  const val = (c, k) => ({
+    CHAN_NAME: `{${c.name.padEnd(31)}}`, TX_TYPE: c.tx || 'UNKN', BATT_BARS: String(c.tx ? c.bars : 255).padStart(3, '0'),
+    BATT_RUN_TIME: String(c.tx ? c.minutes : 65535).padStart(5, '0'), BATT_CHARGE: '255',
+    RX_RF_LVL: String(c.tx ? c.rf : 0).padStart(3, '0'), AUDIO_LVL: String(c.tx ? c.audio : 0).padStart(3, '0'),
+  }[k]);
+  const KEYS = ['CHAN_NAME', 'TX_TYPE', 'BATT_BARS', 'BATT_RUN_TIME', 'BATT_CHARGE', 'RX_RF_LVL', 'AUDIO_LVL'];
+  // batteries run down slowly: a minute of runtime every 6 s, a bar every 40 minutes of runtime
+  setInterval(() => ch.forEach(c => { if (c.tx && c.minutes > 0) { c.minutes--; c.bars = Math.min(c.bars, Math.ceil(c.minutes / 40)); } }), 6000);
+  net.createServer(sock => {
+    sock.setEncoding('ascii'); let buf = ''; const meter = new Set();
+    const rep = (n, k) => { const v = val(ch[n - 1], k); if (v !== undefined) sock.write(`< REP ${n} ${k} ${v} >`); };
+    const t = setInterval(() => meter.forEach(n => {
+      const c = ch[n - 1]; if (!c.tx) return;
+      c.rf = 95 + Math.round(Math.random() * 10); c.audio = 10 + Math.round(Math.random() * 25);
+      sock.write(`< SAMPLE ${n} ALL ${Math.random() < 0.5 ? 'AX' : 'XB'} ${String(c.rf).padStart(3, '0')} ${String(c.audio).padStart(3, '0')} >`);
+    }), 1000);
+    sock.on('data', d => {
+      buf += d; let i;
+      while ((i = buf.indexOf('>')) >= 0) {
+        const [verb, n, k, arg] = buf.slice(0, i).replace(/^[^<]*</, '').trim().split(/\s+/); buf = buf.slice(i + 1);
+        const all = n === '0' ? ch.map((_, j) => j + 1) : [Number(n)];
+        if (verb === 'GET') all.forEach(x => (k === 'ALL' ? KEYS : [k]).forEach(kk => rep(x, kk)));
+        else if (verb === 'SET' && k === 'METER_RATE') all.forEach(x => (Number(arg) ? meter.add(x) : meter.delete(x)));
+        else if (verb === 'SET' && k === 'FLASH') log('shure', `flash ch ${n}`);
+      }
+    });
+    sock.on('close', () => clearInterval(t)); sock.on('error', () => {});
+  }).listen(port, () => log('shure', `receiver on ${port}`));
 }
 
 // ---------- PTZ camera (Sony VISCA over IP, UDP) ----------
@@ -205,6 +256,9 @@ function panasonicSim(port, st, { user = 'admin1', password = '', closeAfterRepl
 eosSim(13037);
 qlabSim(15300);
 tfSim(14928);
+// Two 4-channel receivers for eight packs: one pack nearly flat, one not switched on yet
+shureSim(12202, [{ name: 'Lead M', tx: 'ULXD1', bars: 5, minutes: 480 }, { name: 'Lead F', tx: 'ULXD1', bars: 4, minutes: 300 }, { name: 'Ens 1', tx: 'ULXD1', bars: 1, minutes: 35 }, { name: 'Ens 2', tx: 'ULXD1', bars: 5, minutes: 470 }]);
+shureSim(12203, [{ name: 'Ens 3', tx: 'ULXD1', bars: 4, minutes: 320 }, { name: 'Ens 4', tx: 'ULXD1', bars: 3, minutes: 200 }, { name: 'Ens 5', tx: null, bars: 0, minutes: 0 }, { name: 'Ens 6', tx: 'ULXD1', bars: 5, minutes: 455 }]);
 viscaSim(15238, 'cam1'); viscaSim(15239, 'cam2'); viscaSim(15240, 'cam3');
 // Two Panasonic PT-DZ13Ks (no SDI board fitted) and one PJLink-only projector
 const projL = projectorState('PROJ-L', { inputs: ['RG1', 'RG2', 'VID', 'DVI', 'HD1'], lampHours: [1520, 1498, 1533, 1507] });
