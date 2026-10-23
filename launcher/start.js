@@ -59,7 +59,7 @@ function portFree(port) {
   // The show computer must not go to sleep while Show Control runs (Mac; the display may still sleep).
   if (process.platform === 'darwin') spawn('caffeinate', ['-is', '-w', String(process.pid)], { stdio: 'ignore' }).on('error', () => {});
 
-  let child = null, stopping = false, started = 0, crashes = 0, opened = BACKGROUND;
+  let child = null, stopping = false, started = 0, crashes = 0, opened = BACKGROUND, recovered = false;
   const run = () => {
     if (stopping) return;
     const practice = !isLive();
@@ -73,6 +73,7 @@ function portFree(port) {
         ...process.env, PORT: String(port), SHOW_QUIET: '1', // device activity is in the System tab; keep this window readable
         SHOW_MODE: practice ? 'practice' : 'live', SHOW_SAVE_PATH: practice ? PRACTICE_CFG : USER_CFG, SHOW_LIVE_PATH: USER_CFG,
         SHOW_PRACTICE_PATH: PRACTICE_CFG, SHOW_SIM_CONFIG: SIM_CFG, SHOW_SUPERVISED: '1', SHOW_SIMS: practice ? '1' : '',
+        SHOW_RECOVERED: recovered ? '1' : '', // started again after a crash: raise an alert
       },
     });
     child.on('message', m => { if (m?.t === 'ready') banner(m.urls, practice); });
@@ -81,9 +82,10 @@ function portFree(port) {
       if (stopping) return;
       // Stopped on purpose (window closed, Ctrl-C, shutdown): stop the launcher too.
       if (code === 0 || ['SIGINT', 'SIGTERM', 'SIGHUP'].includes(signal)) return process.exit(0);
-      if (code === RESTART) { console.log('\n  Restarting Show Control with the new settings…\n'); return run(); }
+      if (code === RESTART) { recovered = false; console.log('\n  Restarting Show Control with the new settings…\n'); return run(); }
       // Crashed: start again. Back off if it keeps failing straight away (e.g. the port is taken).
       crashes = Date.now() - started < 20000 ? crashes + 1 : 0;
+      recovered = true;
       const wait = Math.min(30, 2 ** crashes);
       console.log(`\n  Show Control stopped unexpectedly (${signal || `code ${code}`}). Starting it again in ${wait} s…\n`);
       setTimeout(run, wait * 1000);

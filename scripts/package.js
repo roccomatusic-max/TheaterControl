@@ -70,6 +70,15 @@ step-by-step help for the settings to turn on at the device itself.
 On that screen you can also make Show Control start by itself when this
 computer turns on.
 
+BEFORE EACH SHOW: System > Pre-show check tests everything in one go.
+To get a notification on your phone if something stops working, open
+System > Equipment health > Alerts on your phone.
+
+DURING THE SHOW: tap the lock at the top right and choose "Lock the show",
+so nobody can change the cue list or setup by accident. Every saved cue
+list is kept (Edit cues > Undo / history), and everything is backed up
+every night into the "Show Control" folder in your home folder.
+
 Node.js ${NODE_VERSION} is included (MIT licence, see app/runtime).
 `;
 

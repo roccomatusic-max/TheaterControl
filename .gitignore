@@ -2,3 +2,6 @@ node_modules/
 *.log
 dist/
 .cache/
+config/Cue list history/
+config/Backups/
+config/Show reports/
