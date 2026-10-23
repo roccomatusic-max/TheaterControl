@@ -145,8 +145,9 @@ function validateCues(cues) {
     return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(c.note ? { note: String(c.note) } : {}), actions };
   });
 }
-function saveCues(cues, who) {
+function saveCues(cues, who, note) {
   const clean = validateCues(cues);
+  const before = show.cues;
   let onDisk = cfg;
   try { onDisk = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf8')); } catch { /* first save of a practice copy */ }
   if (fs.existsSync(SAVE_PATH)) fs.copyFileSync(SAVE_PATH, `${SAVE_PATH}.bak`);
@@ -154,8 +155,9 @@ function saveCues(cues, who) {
   show.cues = clean;
   show.index = Math.min(show.index, clean.length);
   if (show.lastFired != null && show.lastFired >= clean.length) show.lastFired = null;
-  log({ device: 'show', level: 'cmd', msg: `cue list saved (${clean.length} cues) by ${who}`, t: Date.now() });
+  log({ device: 'show', level: 'cmd', msg: `cue list saved (${clean.length} cues) by ${who}${note ? `: ${note}` : ''}`, t: Date.now() });
   saveState();
+  events.emit('cues-saved', { before, cues: clean, who, note });
 }
 
 // Emergency stop: everything that makes noise, light or movement, all at once.
@@ -256,8 +258,12 @@ function saveSetup(m, who) {
 const SETTINGS_PATH = MODE === 'direct' ? SAVE_PATH : LIVE_PATH;
 const events = new EventEmitter();
 const ctx = {
-  cfg, devices, show, log, broadcast, runAction, fireCue, showSnapshot, writeJson, readJson, events,
-  MODE, SAVE_PATH, LIVE_PATH, SUPERVISED, handlers: {}, initExtras: [], checks: [],
+  cfg, devices, show, log, broadcast, runAction, fireCue, saveCues, showSnapshot, writeJson, readJson, events,
+  MODE, SAVE_PATH, LIVE_PATH, STATE_PATH, SUPERVISED, handlers: {}, initExtras: [], checks: [],
+  DATA_DIR: process.env.SHOW_DATA_DIR || path.dirname(SETTINGS_PATH), // history and backups go here
+  guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
+  // Replaced by features/access.js (PINs per role); this is the single-PIN behaviour without it.
+  access: { required: () => !!PIN, hint: () => ({}), roleFor: pin => (!PIN || String(pin) === String(PIN) ? 'admin' : null) },
   clients: () => [...wss.clients].filter(c => c.authed && c.readyState === 1),
   settings: () => readJson(SETTINGS_PATH, null) ?? readJson(SAVE_PATH, cfg),
   saveSettings(patch) {
@@ -265,7 +271,7 @@ const ctx = {
     writeJson(SETTINGS_PATH, { ...cur, ...patch });
   },
 };
-for (const f of ['health']) require(`./features/${f}`)(ctx);
+for (const f of ['health', 'access', 'lock', 'versions', 'backups']) require(`./features/${f}`)(ctx);
 
 // ---------- HTTP + WS ----------
 // IPv4 addresses an iPad on the same network can reach this computer at.
@@ -308,22 +314,25 @@ function broadcast(msg) {
 
 wss.on('connection', (ws, req) => {
   const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
-  ws.authed = !PIN;
+  ws.authed = !ctx.access.required();
+  ws.role = ws.authed ? 'admin' : null;
   const hello = () => ws.send(JSON.stringify(Object.assign({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
     ui: cfg.ui || {}, groups: groups(), mode: MODE,
   }, ...ctx.initExtras.map(f => f(ws)))));
-  if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required' }));
+  if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required', ...ctx.access.hint() }));
 
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.t === 'auth') {
-      if (String(m.pin) === String(PIN)) { ws.authed = true; hello(); log({ device: 'core', msg: `client ${who} signed in`, t: Date.now() }); }
+      const role = ctx.access.roleFor(m.pin);
+      if (role) { ws.authed = true; ws.role = role; hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
       else ws.send(JSON.stringify({ t: 'auth-failed' }));
       return;
     }
     if (!ws.authed) return;
     try {
+      for (const guard of ctx.guards) guard(m, ws);
       if (m.t === 'cmd') {
         const results = await runAction(m, who);
         if (m.id) ws.send(JSON.stringify({ t: 'result', id: m.id, results }));
@@ -360,7 +369,7 @@ wss.on('connection', (ws, req) => {
 server.listen(PORT, cfg.server?.host || '0.0.0.0', () => {
   const urls = lanAddresses().map(a => a.url);
   console.log(`Show Control "${show.name}" using ${cfgPath}`);
-  console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${PIN ? '  (PIN required)' : ''}`);
+  console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${ctx.access.required() ? '  (PIN required)' : ''}`);
   for (const d of devices.values()) d.start();
   server.emit('ready', { port: PORT, urls });
 });

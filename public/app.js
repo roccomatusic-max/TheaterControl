@@ -102,7 +102,6 @@ function renderDots() {
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; localStorage.setItem('tab', S.tab); render(); }));
 const lockBtn = $('#lockBtn');
 function setLock(on) { document.body.classList.toggle('locked', on); lockBtn.textContent = on ? '🔒' : '🔓'; localStorage.setItem('locked', on ? '1' : ''); }
-lockBtn.addEventListener('click', () => setLock(!document.body.classList.contains('locked')));
 setLock(!!localStorage.getItem('locked'));
 
 // Emergency stop: hold 1.5 s. Works even when the screen is locked.
@@ -521,7 +520,8 @@ function editTab() {
     }
     const sh = S.show;
     wrap.replaceChildren(h('div', { class: 'card' },
-      h('h3', {}, 'Edit cues', h('button', { onclick: () => { ed.draft.push({ number: ed.draft.length + 1, label: 'New cue', actions: [] }); ed.open = ed.draft.length - 1; redraw(); } }, '+ New cue')),
+      h('h3', {}, 'Edit cues', h('span', { class: 'row' }, h('button', { onclick: () => { if (!ed.dirty || confirm('Leave without saving your changes?')) { S.editor = null; S.tab = 'history'; render(); } } }, '↶ Undo / history'),
+        h('button', { onclick: () => { ed.draft.push({ number: ed.draft.length + 1, label: 'New cue', actions: [] }); ed.open = ed.draft.length - 1; redraw(); } }, '+ New cue'))),
       ed.draft.length ? ed.draft.map((c, i) => h('div', { class: 'ed-cue' },
         h('div', { class: 'n' }, c.number ?? i + 1),
         h('div', {}, h('div', {}, c.label), h('div', { class: 'acts' }, (c.actions || []).map(actionText).join(' · ') || 'No actions yet')),

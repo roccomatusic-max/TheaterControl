@@ -121,6 +121,27 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   one message. The show computer needs internet for this (the control network). Settings are in the
   show file: `"alerts": { "on": true, "ntfyTopic": "…", "ntfyServer": "https://ntfy.sh" }`.
 
+## Locks, PINs, undo and backups
+
+- **Lock button** (top right) offers two locks:
+  - **Lock the show**: every screen at once, and it survives a restart. GO, STOP, standby and the
+    everyday controls keep working. Editing or restoring cues, equipment setup, firing a cue out of
+    order, resetting timers and switching equipment off are refused until someone unlocks with the
+    operator or admin PIN.
+  - **Lock this screen**: only STOP works on that screen. Good for a phone in a pocket.
+- **Who can do what** (System tab): an admin PIN (everything; the same PIN as on the Setup screen),
+  an operator PIN (runs the show, edits cues) and a crew PIN (watch only). Optionally, crew can watch
+  without a PIN. With no PINs, there is no sign-in. The PINs apply in practice and live.
+- **Cue list history**: every saved cue list is kept (the newest 200) in `Show Control/Cue list history`.
+  *Undo* puts back the one before the last save, and undoing again redoes. Any earlier version can
+  be put back, with a summary of what changed.
+- **Backups**: every night (03:00 by default, and on start-up if the last one is over a day old) into
+  `Show Control/Backups/<date>`. Each backup has the show files, what each device reported (mixer
+  channel names and levels, Eos show name, projector lamp hours) and any folders added on the System
+  tab, for example the QLab workspace when QLab runs on the show computer. The newest 30 are kept.
+  A cue list can be put back from any backup. The pre-show check warns when the last backup is
+  missing, old or had a problem.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:

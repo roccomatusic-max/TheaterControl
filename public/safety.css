@@ -1,0 +1,38 @@
+/* Show lock, roles, cue list history, backups (see safety.js) */
+body.showlocked #lockBtn { background: var(--blue); border-color: var(--blue); }
+body.locked #lockBtn { background: var(--amber); border-color: var(--amber); }
+#rolePill { background: #1b2a44; color: #9cc3ff; }
+
+/* Watch-only screens: everything shows, nothing can be pressed except moving around. */
+body.role-viewer main button:not(.always), body.role-viewer .fader, body.role-viewer .joy, body.role-viewer main input, body.role-viewer main select { pointer-events: none; opacity: .45; }
+body.role-viewer #estop, body.role-viewer #goBtn { display: none; }
+body.role-viewer .showtop { grid-template-columns: 1fr; }
+#pin .watch { background: none; color: var(--dim); }
+
+.sheet { position: fixed; inset: 0; background: #000c; display: grid; place-items: center; z-index: 20; padding: 16px; }
+.sheet .box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; width: min(460px, 100%); display: grid; gap: 10px; max-height: 90vh; overflow: auto; }
+.sheet h2 { margin: 0 0 4px; }
+.sheet p { margin: 0; color: #c9ced6; }
+.sheet input { width: 100%; }
+.sheet .err { color: #ffb4b6; min-height: 1em; }
+button.choice { display: grid; gap: 4px; text-align: left; padding: 14px; }
+button.choice b { font-size: 17px; } button.choice span { color: var(--dim); font-size: 13px; font-weight: 400; }
+button.choice.primary span { color: #d7f5e2; }
+
+.form label small { display: block; margin-top: 2px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+label.check { display: flex; align-items: center; gap: 10px; }
+label.check input { width: 22px; height: 22px; min-height: 0; }
+
+.versions { display: grid; gap: 6px; }
+.version { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.version.current { border: 1px solid var(--go); }
+.hcard .good, .card .kv .good { color: #7ee2a2; } .card .kv .bad { color: #ffb4b6; }
+ul.plain { margin: 4px 0 8px; padding-left: 18px; color: #c9ced6; font-size: 14px; }
+ul.plain li { margin-bottom: 4px; }
+button.mini { min-height: 32px; padding: 3px 10px; font-size: 13px; margin-left: 6px; }
+input.time { font-size: 15px; min-height: 36px; padding: 4px 8px; width: 120px; }
+details summary { cursor: pointer; color: var(--dim); margin: 10px 0 6px; }
+.bk { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.picker .here { margin-bottom: 8px; word-break: break-all; }
+.picker .dirs { display: grid; gap: 4px; margin-top: 8px; max-height: 45vh; overflow: auto; }
+.picker .dirs button { text-align: left; }

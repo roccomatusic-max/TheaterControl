@@ -146,7 +146,7 @@ function healthTab() {
   if (S.runCheck) { S.runCheck = false; runCheck(); }
 
   return h('div', { class: 'grid healthview' },
-    h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Pre-show check', h('button', { onclick: () => { S.tab = 'sys'; render(); } }, '← System')), checkBox),
+    h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Pre-show check', h('button', { class: 'always', onclick: () => { S.tab = 'sys'; render(); } }, '← System')), checkBox),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Equipment right now'), tiles),
     h('div', { class: 'card' }, h('h3', {}, 'Recent alerts'), alerts),
     h('div', { class: 'card' }, h('h3', {}, 'Alerts on your phone'), phone));
