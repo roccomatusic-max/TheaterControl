@@ -1,7 +1,7 @@
 /* Health: alert banner, ready dots, pre-show check, equipment tiles (see health.js) */
-#alertBar { background: #4a1d06; color: #ffd9b0; padding: 8px 12px; display: flex; gap: 10px; align-items: center; border-bottom: 2px solid var(--amber); }
-#alertBar .msg { flex: 1; font-weight: 700; cursor: pointer; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-#alertBar button { min-height: 36px; padding: 4px 12px; }
+/* the alert bar itself is styled in app.css; these are the kinds health adds */
+#alertBar .alert.equipment, #alertBar .alert.emergency { background: #5b0f14; color: #fff; }
+#alertBar .alert.equipment b { cursor: pointer; }
 #statusDots { cursor: pointer; }
 
 .rdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 6px; vertical-align: middle; }

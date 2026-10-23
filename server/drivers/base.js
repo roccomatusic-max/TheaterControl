@@ -18,7 +18,7 @@ class Driver extends EventEmitter {
   changed() { this.emit('changed', this); }
   seen() { this.lastSeen = Date.now(); if (this.status !== 'online') this.setStatus('online'); }
   log(msg, level = 'info') { this.emit('log', { device: this.id, level, msg, t: Date.now() }); }
-  snapshot() { return { id: this.id, type: this.type, name: this.name, status: this.status, state: this.state, lastSeen: this.lastSeen }; }
+  snapshot() { return { id: this.id, type: this.type, ...(this.cfg.profile ? { profile: this.cfg.profile } : {}), name: this.name, status: this.status, state: this.state, lastSeen: this.lastSeen }; }
   // Mark offline if nothing heard for `ms`. Call from drivers that get regular traffic/heartbeats.
   watchdog(ms) {
     this._wd = setInterval(() => {

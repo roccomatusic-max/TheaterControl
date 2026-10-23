@@ -90,7 +90,7 @@ module.exports = function failover(ctx) {
     me.active = true; me.since = Date.now(); me.reason = reason;
     const l = link; link = null; l?.close();
     ctx.startDevices();
-    ctx.alert?.('error', 'failover', `${me.role === 'backup' ? 'The backup computer has taken over' : 'This computer is running the show again'}: ${reason}.`);
+    ctx.alert?.('error', 'failover', `${me.role === 'backup' ? 'The backup computer has taken over' : 'This computer is running the show again'}: ${reason}.`, { kind: 'backup' });
     ctx.broadcast({ t: 'failover', ...info() }); // screens connected here reload as the active computer
   }
 
@@ -149,7 +149,7 @@ module.exports = function failover(ctx) {
     ctx.handlers['mirror-hello'] = (m, ws) => {
       if (!me.active) throw new Error('This computer is on standby itself.');
       ws.mirror = true; mirrors.add(ws);
-      ws.on('close', () => { mirrors.delete(ws); if (me.active && me.role) ctx.alert?.('error', 'failover-mirror', 'The backup computer is no longer connected, so it can\'t take over.'); });
+      ws.on('close', () => { mirrors.delete(ws); if (me.active && me.role) ctx.alert?.('error', 'failover-mirror', 'The backup computer is no longer connected, so it can\'t take over.', { kind: 'backup' }); });
       ctx.alert?.('ok', 'failover-mirror', 'Backup computer connected');
       ws.send(JSON.stringify({ t: 'mirror-file', file: fileNow() }));
       return { ok: true };
