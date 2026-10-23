@@ -24,12 +24,14 @@
   <button id="lockBtn" class="lock" title="Lock controls">🔓</button>
 </header>
 <div id="emergencyBar" hidden></div>
+<div id="alertBar" hidden></div>
 <main id="main"></main>
 <div id="offline" hidden><div><b>Not connected to Show Control</b><span>Reconnecting… Buttons do nothing until this goes away.</span></div></div>
 <nav id="tabs">
   <button data-tab="show" class="on">Show</button>
   <button data-tab="lx">Lighting</button>
   <button data-tab="snd">Sound</button>
+  <button data-tab="mics">Mics</button>
   <button data-tab="proj">Projection</button>
   <button data-tab="cam">Cameras</button>
   <button data-tab="sys">System</button>
@@ -40,6 +42,8 @@
 <div id="toast"></div>
 <script src="app.js"></script>
 <script src="setup.js"></script>
+<script src="mics.js"></script>
+<script src="wizard.js"></script>
 <script src="health.js"></script>
 </body>
 </html>

@@ -30,18 +30,20 @@ const startSims = () => { sims = spawn(process.execPath, ['-e', "require('./sim/
   await wait(3000);
 
   const ws = new WebSocket(`ws://127.0.0.1:${env.PORT}/ws`);
-  const st = { devices: {}, alerts: [], init: null }; const pending = {}; let seq = 0;
+  // alerts: every alert seen on the alert bar; list: what the bar shows now; notices: "answering again"
+  const st = { devices: {}, alerts: [], list: [], notices: [], init: null }; const pending = {}; let seq = 0;
   ws.on('message', raw => {
     const m = JSON.parse(raw);
     if (m.t === 'init') { st.init = m; m.devices.forEach(d => (st.devices[d.id] = d)); }
     if (m.t === 'device') st.devices[m.device.id] = m.device;
-    if (m.t === 'alert') st.alerts.push(m.alert);
+    if (m.t === 'alerts') { st.list = m.alerts; for (const a of m.alerts) if (!st.alerts.some(x => x.key === a.key && x.at === a.at)) st.alerts.push(a); }
+    if (m.t === 'notice') st.notices.push(m.msg);
     if ((m.t === 'reply' || m.t === 'error') && pending[m.id]) pending[m.id](m.t === 'reply' ? m.data : { error: m.msg });
   });
   await new Promise(r => ws.on('open', r)); await wait(1500);
   const send = m => ws.send(JSON.stringify(m));
   const ask = m => new Promise(r => { const id = ++seq; pending[id] = r; send({ ...m, id }); });
-  assert.deepEqual(st.init.alerts, [], 'no alerts at start');
+  assert.deepEqual(st.init.alerts.filter(a => a.kind === 'equipment'), [], 'no equipment alerts at start');
 
   // Everything answering: no problems with the equipment or the show.
   let c = await ask({ t: 'preshow-check' });
@@ -67,7 +69,7 @@ const startSims = () => { sims = spawn(process.execPath, ['-e', "require('./sim/
 
   // Unplug everything: each device raises one alert (after the grace period), on screen and on the phone.
   sims.kill(); await wait(9000); // cameras are UDP: noticed by a 6 s watchdog
-  const down = st.alerts.filter(a => a.level === 'error');
+  const down = st.alerts.filter(a => a.kind === 'equipment' && a.level === 'error');
   for (const id of ['eos', 'tf5', 'qlab', 'cam1']) assert.ok(down.some(a => a.key === id), `alert for ${id}: ${JSON.stringify(st.alerts)}`);
   assert.ok(pushed.some(p => p.topic === 'showcontrol-test' && /Stopped answering: .*(Eos.*TF5|TF5.*Eos)/.test(p.message) && p.priority === 5), `alerts that arrive together go to the phone as one: ${JSON.stringify(pushed)}`);
   assert.ok(pushed.length < down.length, 'fewer phone messages than alerts');
@@ -79,12 +81,16 @@ const startSims = () => { sims = spawn(process.execPath, ['-e', "require('./sim/
   assert.ok(late.alerts.some(a => a.key === 'eos'), 'active alerts sent to new screens');
 
   // Plug back in: "answering again" clears each alert.
-  st.alerts = []; startSims(); await wait(7000);
-  for (const id of ['eos', 'tf5', 'qlab']) assert.ok(st.alerts.some(a => a.key === id && a.level === 'ok'), `${id} back: ${JSON.stringify(st.alerts)}`);
+  startSims(); await wait(7000);
+  for (const id of ['eos', 'tf5', 'qlab']) assert.ok(!st.list.some(a => a.key === id), `${id} alert cleared: ${JSON.stringify(st.list)}`);
+  for (const name of ['ETC Eos', 'QLab', 'Yamaha TF5']) assert.ok(st.notices.some(n => n === `${name} is answering again`), `${name} back: ${JSON.stringify(st.notices)}`);
 
   // Emergency stop pings the phone too.
   send({ t: 'emergency' }); await wait(2500);
   assert.ok(pushed.some(p => /Emergency STOP/.test(p.message)), 'emergency stop sent to phone');
+  assert.equal(st.list.find(a => a.key === 'emergency')?.kind, 'emergency', 'and shown on the alert bar');
+  // the sound alerts (a low mic battery in practice mode) reach the phone too
+  assert.ok(pushed.some(p => /Low battery/.test(p.message)), `low battery sent to phone: ${JSON.stringify(pushed.map(p => p.message))}`);
 
   // Phone alert settings: test message, turn off, turn on again keeps the same private channel name.
   const before = pushed.length;
