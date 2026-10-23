@@ -70,6 +70,10 @@ step-by-step help for the settings to turn on at the device itself.
 On that screen you can also make Show Control start by itself when this
 computer turns on.
 
+BEFORE EACH SHOW: System > Pre-show check tests everything in one go.
+To get a notification on your phone if something stops working, open
+System > Equipment health > Alerts on your phone.
+
 Node.js ${NODE_VERSION} is included (MIT licence, see app/runtime).
 `;
 

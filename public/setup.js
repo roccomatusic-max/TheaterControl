@@ -64,15 +64,6 @@ const KINDS = {
 };
 const kindLabel = t => KINDS[t]?.label || t;
 
-function ask(t, payload = {}, ms = 20000) {
-  const id = ++cmdSeq;
-  send({ t, id, ...payload });
-  return new Promise(res => {
-    pending[id] = r => res(typeof r === 'string' ? { error: r } : r === true ? {} : r);
-    setTimeout(() => { if (pending[id]) { delete pending[id]; res({ error: 'No answer from Show Control' }); } }, ms);
-  });
-}
-
 // "10.101.something" for a 255.255.0.0 network: the part of the address every device must share.
 const samePart = n => { const k = n.netmask.split('.').filter(x => x === '255').length || 3; return `${n.address.split('.').slice(0, k).join('.')}${'.something'.repeat(4 - k)}`; };
 
