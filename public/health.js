@@ -9,23 +9,30 @@ VIEWS.health = () => healthTab();
 NAV_PARENT.health = 'sys';
 $('#statusDots').addEventListener('click', openHealth);
 
-// ---------- alert banner on every screen ----------
-const alertBar = h('div', { id: 'alertBar', hidden: true });
-$('#emergencyBar').after(alertBar);
-let dismissed = 0; // alerts up to this id were closed with ×
+// ---------- the alert bar on every screen ----------
+// Equipment that stopped answering, the emergency stop, possible feedback, low mic batteries. Each
+// stays until it's dismissed (for everyone) or, for equipment, until it answers again.
+const seenAlerts = new Set();
 function renderAlerts() {
-  const list = (S.alerts || []).filter(a => a.id > dismissed);
-  alertBar.hidden = !list.length;
-  // Several at once (a switch or cable): one short line, not a wall of text.
-  const devs = list.filter(a => S.devices[a.key]), first = Math.min(...list.map(a => a.at));
-  const text = list.length === 1 ? `⚠ ${list[0].msg} at ${clock(list[0].at)}`
-    : devs.length === list.length ? `⚠ ${list.length} stopped answering since ${clock(first)}: ${devs.map(a => S.devices[a.key].name.split(' · ')[0]).join(', ')}${devs.length >= 3 ? '. Check the show network switch.' : ''}`
-      : `⚠ ${list.length} alerts since ${clock(first)}: ${list.map(a => a.msg).join(' · ')}`;
-  alertBar.replaceChildren(...list.length ? [
-    h('span', { class: 'msg', onclick: openHealth }, text),
-    h('button', { class: 'always', onclick: openHealth }, 'Details'),
-    h('button', { class: 'always', title: 'Hide until the next alert', onclick: () => { dismissed = Math.max(...list.map(a => a.id)); renderAlerts(); } }, '×'),
-  ] : []);
+  // the emergency stop has its own banner, so it isn't repeated here
+  const bar = $('#alertBar'), list = (S.alerts || []).filter(a => a.kind !== 'emergency');
+  const fresh = list.filter(a => !seenAlerts.has(`${a.key}@${a.at}`));
+  if (fresh.length) { navigator.vibrate?.([200, 100, 200]); beep(); }
+  list.forEach(a => seenAlerts.add(`${a.key}@${a.at}`));
+  bar.hidden = !list.length;
+  const dismiss = a => send({ t: 'alert-dismiss', key: a.key });
+  // Several pieces of equipment at once (a switch or a cable): one line, not a wall of alerts.
+  const down = list.filter(a => a.kind === 'equipment');
+  const rows = down.length > 1 ? [{ group: down, at: Math.min(...down.map(a => a.at)) }, ...list.filter(a => a.kind !== 'equipment')] : list;
+  bar.replaceChildren(...rows.slice(0, 3).map(r => r.group
+    ? h('div', { class: 'alert equipment' }, h('b', { onclick: openHealth }, `${r.group.length} stopped answering: ${r.group.slice(0, 5).map(a => a.name || a.key).join(', ')}${r.group.length > 5 ? ` and ${r.group.length - 5} more` : ''}`),
+      h('span', {}, `since ${clock(r.at)}${r.group.length >= 3 ? ' · check the show network switch' : ''}`),
+      h('button', { class: 'always', onclick: openHealth }, 'Details'), h('button', { class: 'always', onclick: () => r.group.forEach(dismiss) }, 'Dismiss'))
+    : h('div', { class: `alert ${r.kind || ''}` }, h('b', {}, r.title), h('span', {}, `${r.detail ? `${r.detail} · ` : ''}${clock(r.at)}`),
+      r.action && h('button', { class: 'danger always', onclick: () => { cmd(r.action.device, r.action.cmd, r.action.args); dismiss(r); } }, r.action.label),
+      r.kind === 'equipment' && h('button', { class: 'always', onclick: openHealth }, 'Details'),
+      h('button', { class: 'always', onclick: () => dismiss(r) }, 'Dismiss'))),
+  ...(rows.length > 3 ? [h('div', { class: 'dim' }, `and ${rows.length - 3} more`)] : []));
 }
 // A short beep for alerts. Browsers only allow sound after the screen has been touched once.
 let audio;
@@ -38,14 +45,9 @@ function beep() {
     o.connect(g).connect(audio.destination); o.start(audio.currentTime + at); o.stop(audio.currentTime + at + 0.15);
   });
 }
-onMsg('init', m => { S.alerts = m.alerts || []; S.lastCheck = m.lastCheck || null; renderAlerts(); });
-onMsg('alert', ({ alert: a }) => {
-  S.alerts = (S.alerts || []).filter(x => x.key !== a.key);
-  if (a.level === 'error') { S.alerts.push(a); navigator.vibrate?.([200, 100, 200]); beep(); }
-  else toast(a.msg, 5000);
-  renderAlerts();
-  if (S.tab === 'health') S.healthRefresh?.();
-});
+onMsg('init', m => { S.lastCheck = m.lastCheck || null; });
+onMsg('alerts', () => { if (S.tab === 'health') S.healthRefresh?.(); });
+onMsg('notice', m => { toast(m.msg, 5000); if (S.tab === 'health') S.healthRefresh?.(); });
 onMsg('check', m => { S.lastCheck = m.check; if (S.tab === 'health') S.drawCheck?.(); });
 
 // ---------- System tab card ----------
