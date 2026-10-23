@@ -10,6 +10,7 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const drivers = require('./drivers');
 const setup = require('./setup');
+const createCrew = require('./crew');
 
 const cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.join(__dirname, '../config/show.json'));
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
@@ -127,6 +128,9 @@ function saveState() {
   }, 200);
 }
 loadState();
+const crew = createCrew({ cfg, show, savePath: SAVE_PATH, writeJson, broadcast: m => broadcast(m), log, saveCues: (c, who) => saveCues(c, who),
+  statePath: STATE_PATH && path.join(path.dirname(STATE_PATH), `.${path.basename(SAVE_PATH, '.json')}.crew.json`),
+  showChanged: () => broadcast({ t: 'show', show: showSnapshot() }) });
 
 // Cue list edits from the iPad. Validated, backed up, then written to the show file.
 function validateCues(cues) {
@@ -142,7 +146,10 @@ function validateCues(cues) {
       if (!(delay >= 0 && delay <= 600)) throw new Error(`${where}: delay must be 0-600 seconds`);
       return { device: a.device, cmd: a.cmd, ...(a.args && Object.keys(a.args).length ? { args: a.args } : {}), ...(delay ? { delay } : {}) };
     });
-    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(c.note ? { note: String(c.note) } : {}), actions };
+    // crew tasks: who does what on this cue (shown on their phone's run sheet and cue light)
+    const tasks = (Array.isArray(c.crew) ? c.crew : []).filter(x => x && typeof x.role === 'string' && x.role.trim())
+      .map(x => ({ role: x.role.trim(), task: String(x.task || '').trim() }));
+    return { number: c.number === '' || c.number == null ? i + 1 : c.number, label: c.label.trim() || `Cue ${i + 1}`, ...(c.note ? { note: String(c.note) } : {}), ...(tasks.length ? { crew: tasks } : {}), actions };
   });
 }
 function saveCues(cues, who, note) {
@@ -191,6 +198,7 @@ function fireCue(i, source) {
   }
   broadcast({ t: 'show', show: showSnapshot() });
   saveState();
+  crew.fired(i);
 }
 function timer(name, op) {
   const tm = show.timers[name]; if (!tm) return;
@@ -318,7 +326,7 @@ wss.on('connection', (ws, req) => {
   ws.role = ws.authed ? 'admin' : null;
   const hello = () => ws.send(JSON.stringify(Object.assign({
     t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
-    ui: cfg.ui || {}, groups: groups(), mode: MODE,
+    ui: cfg.ui || {}, groups: groups(), mode: MODE, crew: crew.snapshot(), script: crew.script(),
   }, ...ctx.initExtras.map(f => f(ws)))));
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required', ...ctx.access.hint() }));
 
@@ -346,6 +354,7 @@ wss.on('connection', (ws, req) => {
         broadcast({ t: 'show', show: showSnapshot() });
       }
       else if (m.t === 'emergency') await emergencyStop(who);
+      else if (m.t === 'crew') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: crew.handle(m, who) }));
       else if (m.t === 'setup-get') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: setupInfo() }));
       else if (m.t === 'setup-test') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await setup.testDevice(m.device || {}) }));
       else if (m.t === 'setup-save') ws.send(JSON.stringify({ t: 'reply', id: m.id, data: saveSetup(m, who) }));

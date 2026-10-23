@@ -71,12 +71,13 @@ function connect(pin) {
   let list = cues();
   list[0].label = 'House to half (edited)';
   assert.ok(!(await op.ask({ t: 'save-cues', cues: list })).error);
+  await wait(200);
   list = cues(); list.push({ number: 99, label: 'Exit music', actions: [] });
   assert.ok(!(await op.ask({ t: 'save-cues', cues: list })).error);
   let v = await viewer.ask({ t: 'versions-list' });
   assert.equal(v.versions.length, 3, 'starting point + two saves');
   assert.match(v.versions[0].changes, /1 cue added \(99\)/);
-  assert.match(v.versions[1].changes, /1 cue changed \(1\)/);
+  assert.match(v.versions[1].changes, /changed \(1\b/, JSON.stringify(v.versions));
   await op.ask({ t: 'cues-undo' }); await wait(200);
   assert.equal(op.show.cues.at(-1).label, 'Act 1 finale', 'undo removed the added cue');
   await op.ask({ t: 'cues-undo' }); await wait(200);

@@ -35,10 +35,14 @@ module.exports = function access(ctx) {
     atLeast: (ws, role) => RANK[ws.role || 'admin'] >= RANK[role],
   };
 
+  // Crew phones and the front-of-house screen sign in with the crew PIN: they may answer cue lights,
+  // send calls, sign off checklist items and set the house status, but not change the script.
+  const viewerCrew = m => m.t === 'crew' && m.op !== 'script';
+
   ctx.guards.push((m, ws) => {
     const role = ws.role || 'admin';
     if (role === 'admin') return;
-    if (role === 'viewer' && !viewerOk.has(m.t)) throw new Error('This screen is signed in to watch only. Sign in with the operator PIN to control the show.');
+    if (role === 'viewer' && !viewerOk.has(m.t) && !viewerCrew(m)) throw new Error('This screen is signed in to watch only. Sign in with the operator PIN to control the show.');
     if (adminOnly.has(m.t)) throw new Error('Only the admin PIN can change this.');
   });
 
