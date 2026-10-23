@@ -3,7 +3,8 @@
 // (grandMA, Hog, ETC, ChamSys, QLab...), notes, CCs and program changes for anything with MIDI,
 // and real MIDI cables through a Mac that bridges its network session to a USB interface.
 // We are the session initiator: invite on the control port, then on port + 1, then keep the
-// clock in sync (CK) so the far end keeps the session open.
+// clock in sync (CK) so the far end keeps the session open. Incoming MIDI is emitted as 'midi'
+// events (one complete message per event) for features that trigger on it.
 const dgram = require('dgram');
 const crypto = require('crypto');
 const Driver = require('./base');
@@ -66,7 +67,8 @@ class AppleMIDIDriver extends Driver {
     this.dat.send(b, this.port + 1, this.cfg.host);
   }
   onMessage(sock, m) {
-    if (m.length < 4 || m.readUInt16BE(0) !== SIG) return; // we only send MIDI, never expect it back
+    if (m.length < 4) return;
+    if (m.readUInt16BE(0) !== SIG) { if (sock === this.dat && this.phase === 'open') this.receive(m); return; }
     const cmd = m.toString('ascii', 2, 4);
     if (cmd === 'OK' && sock === this.ctl && this.phase === 'ctl') {
       this.phase = 'dat';
@@ -84,6 +86,40 @@ class AppleMIDIDriver extends Driver {
     } else if (cmd === 'CK' && m.length >= 36) {
       this.lastSync = Date.now(); this.seen();
       if (m[8] === 1) this.sync(2, [m.readBigUInt64BE(12), m.readBigUInt64BE(20), now100us()]);
+    }
+  }
+
+  // Incoming RTP-MIDI: emits 'midi' with each complete message as a byte array (notes, CC, MSC,
+  // MIDI timecode...). The recovery journal after the command list is ignored.
+  receive(m) {
+    if ((m[0] & 0xc0) !== 0x80 || (m[1] & 0x7f) !== 0x61) return;
+    let off = 12 + (m[0] & 0x0f) * 4;
+    const flags = m[off];
+    if (flags === undefined) return;
+    const len = flags & 0x80 ? ((flags & 0x0f) << 8) | m[off + 1] : flags & 0x0f;
+    off += flags & 0x80 ? 2 : 1;
+    const end = Math.min(m.length, off + len);
+    const delta = () => { for (let i = 0; i < 4 && off < end; i++) if (!(m[off++] & 0x80)) break; };
+    const dataLen = st => (st >= 0xf0 ? { 0xf1: 1, 0xf2: 2, 0xf3: 1 }[st] ?? 0 : [0xc0, 0xd0].includes(st & 0xf0) ? 1 : 2);
+    let status = this.runningStatus || 0, first = true;
+    this.seen();
+    while (off < end) {
+      if (!first || flags & 0x20) delta();
+      first = false;
+      if (off >= end) break;
+      if (m[off] === 0xf0) { // sysex, complete in one packet
+        const stop = m.indexOf(0xf7, off);
+        if (stop < 0 || stop >= end) break;
+        this.emit('midi', [...m.subarray(off, stop + 1)]);
+        off = stop + 1; continue;
+      }
+      if (m[off] & 0x80) status = m[off++];
+      if (!status) break;
+      const n = dataLen(status);
+      if (off + n > end) break;
+      this.emit('midi', [status, ...m.subarray(off, off + n)]);
+      off += n;
+      if (status < 0xf0) this.runningStatus = status; // running status only carries for channel messages
     }
   }
 

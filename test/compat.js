@@ -227,6 +227,15 @@ const make = (type, cfg) => { const D = drivers[type]; const tpl = catalog.templ
     assert.equal(body.toString('hex'), 'f07f01020101' + Buffer.from('12.5').toString('hex') + '00' + Buffer.from('1').toString('hex') + 'f7');
     assert.equal(midi[1].subarray(12, 14).toString('hex'), '8014');
     assert.equal(midi[2].subarray(12).toString('hex'), '02c004');
+    // incoming MIDI: note with running status, MTC quarter frame, MSC sysex, as one RTP-MIDI packet
+    const heard = [];
+    d.on('midi', b => heard.push(Buffer.from(b).toString('hex')));
+    const list = Buffer.from('903c7f' + '00' + '3e40' + '00' + 'f123' + '00' + 'f07f010201013100f7', 'hex');
+    const rtp = Buffer.alloc(12); rtp[0] = 0x80; rtp[1] = 0x61;
+    const pktIn = Buffer.concat([rtp, Buffer.from([0x80 | (list.length >> 8), list.length & 0xff]), list]);
+    dat.send(pktIn, d.dat.address().port, '127.0.0.1');
+    await until(() => heard.length === 4);
+    assert.deepEqual(heard, ['903c7f', '903e40', 'f123', 'f07f010201013100f7']);
     const t = await setup.testDevice({ id: 'm', type: 'applemidi', host: '127.0.0.1', port: ctl.address().port });
     assert.ok(t.ok && /Sim session/.test(t.detail), t.detail);
     d.stop(); await wait(100); ctl.close(); dat.close();
