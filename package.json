@@ -1,12 +1,12 @@
 {
   "name": "show-control",
-  "version": "0.4.0",
+  "version": "0.8.0",
   "description": "Show control for theatre: ETC Eos, Yamaha TF, QLab, PTZ cameras, projectors from an iPad",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "sim": "node sim/run.js",
-    "test": "node test/smoke.js && node test/projection.js && node test/safety.js && node test/setup.js && node test/crew.js && node test/sound.js && node test/compat.js",
+    "test": "node test/smoke.js && node test/projection.js && node test/safety.js && node test/setup.js && node test/crew.js && node test/sound.js && node test/compat.js && node test/health.js && node test/lock.js && node test/failover.js && node test/showtools.js",
     "package": "node scripts/package.js"
   },
   "license": "UNLICENSED",
