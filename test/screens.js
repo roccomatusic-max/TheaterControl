@@ -118,6 +118,18 @@ function connect({ screen, pin, from = '127.0.0.2' } = {}) {
   assert.match(alert.title, /Spare console test: Spare Eos did not take it/);
   assert.match(alert.detail, /not connected/);
 
+  // ---- two people editing the cue list at once: the second save is asked about, not silent ----
+  const hash = cues => { let x = 5381; const t = JSON.stringify(cues); for (let i = 0; i < t.length; i++) x = (x * 33 + t.charCodeAt(i)) >>> 0; return x.toString(36); };
+  await wait(300);
+  const base = hash(ipad.show.cues);
+  const mine = JSON.parse(JSON.stringify(ipad.show.cues)); mine[0].label = 'Edited on the iPad';
+  const theirs = JSON.parse(JSON.stringify(ipad.show.cues)); theirs[1].label = 'Edited on the phone';
+  assert.ok(!(await again.ask({ t: 'save-cues', cues: theirs, base })).error, 'first save goes in');
+  assert.match((await ipad.ask({ t: 'save-cues', cues: mine, base })).error || '', /^changed-elsewhere:Fly floor saved the cue list/);
+  assert.ok(!(await ipad.ask({ t: 'save-cues', cues: mine, base, force: true })).error, 'saved anyway when asked to');
+  await wait(200);
+  assert.equal(ipad.show.cues[0].label, 'Edited on the iPad');
+
   // ---- kiosk: leaving needs the admin PIN, when there is one ----
   assert.ok((await again.ask({ t: 'kiosk-exit', pin: '' })).ok);
 

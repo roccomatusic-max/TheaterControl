@@ -206,6 +206,10 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 - **Two GOs at once**: a GO from another screen within half a second of the last one (the SM and the
   operator, an iPad and a Stream Deck) is ignored, and that screen is told. `"show": { "goLockout": 0.5 }`
   in the show file changes the time; 0 turns it off.
+- **Two people editing cues at once**: if someone else saved the cue list while you were editing,
+  Save asks before replacing their changes (theirs stay in Undo / history either way).
+- **Wrong PINs**: after 5 in a row, that iPad or phone has to wait before trying again (15 seconds,
+  then longer).
 - **Log file**: everything on the System tab's log is also kept in `Show Control/Logs/<date>.log`
   (the newest 60 days), so what happened during last night's show can be looked up after a restart.
 - **A cue step that didn't work** (equipment not connected, refused, no answer) shows on every screen

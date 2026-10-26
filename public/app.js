@@ -558,18 +558,24 @@ function crewTaskEditor(x, list, i, redraw) {
     h('div', { class: 'tools' }, h('button', { class: 'danger', onclick: () => { list.splice(i, 1); redraw(); } }, 'Remove')));
 }
 
+// Same fingerprint of a cue list as the server's (server/index.js cuesHash).
+function cuesHash(cues) { let x = 5381; const t = JSON.stringify(cues); for (let i = 0; i < t.length; i++) x = (x * 33 + t.charCodeAt(i)) >>> 0; return x.toString(36); }
 function editTab() {
-  const ed = S.editor ||= { draft: JSON.parse(JSON.stringify(S.show.cues)), open: null, dirty: false };
+  const ed = S.editor ||= { draft: JSON.parse(JSON.stringify(S.show.cues)), base: cuesHash(S.show.cues), open: null, dirty: false };
   const wrap = h('div', {});
   const redraw = () => { ed.dirty = true; draw(); };
   const leave = () => { S.editor = null; S.tab = 'show'; render(); };
-  const save = async () => {
-    const r = await new Promise(res => { const id = ++cmdSeq; pending[id] = res; send({ t: 'save-cues', id, cues: ed.draft }); });
-    if (r === true) { toast('Cue list saved'); leave(); } else toast(`Not saved: ${r || 'no answer from Show Control'}`, 6000);
+  const save = async force => {
+    const r = await new Promise(res => { const id = ++cmdSeq; pending[id] = res; send({ t: 'save-cues', id, cues: ed.draft, base: ed.base, force }); });
+    if (r === true) { toast('Cue list saved'); leave(); }
+    else if (/^changed-elsewhere:/.test(r)) {
+      if (confirm(`${r.slice(18)}. Save yours anyway? That replaces their changes (they stay in Undo / history).`)) save(true);
+    }
+    else toast(`Not saved: ${r || 'no answer from Show Control'}`, 6000);
   };
   const saveBar = () => h('div', { class: 'sticky-save' },
     h('button', { onclick: () => (!ed.dirty || confirm('Discard your changes to the cue list?')) && leave() }, 'Cancel'),
-    h('button', { class: 'primary', onclick: save }, 'Save cue list'));
+    h('button', { class: 'primary', onclick: () => save(false) }, 'Save cue list'));
   function draw() {
     if (ed.open != null) {
       const c = ed.draft[ed.open];

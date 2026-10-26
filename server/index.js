@@ -296,6 +296,11 @@ function saveCues(cues, who, note) {
   events.emit('cues-saved', { before, cues: clean, who, note });
 }
 
+// A short fingerprint of a cue list, the same as public/app.js makes (cuesHash), so the editor can
+// tell whether the cue list changed while it was open.
+function cuesHash(cues) { let x = 5381; const t = JSON.stringify(cues); for (let i = 0; i < t.length; i++) x = (x * 33 + t.charCodeAt(i)) >>> 0; return x.toString(36); }
+let lastCueSave = { name: '', at: 0 };
+
 // Mic plot edits from the iPad: validated, backed up, saved to the show file, used at once.
 function saveMics(m, who) {
   const clean = validateMics(m, id => devices.has(id) || cfg.devices.some(d => d.id === id));
@@ -693,7 +698,11 @@ function onConnection(ws, req) {
         ws.send(JSON.stringify({ t: 'reply', id: m.id, data: require('../launcher/autostart').set(!!m.on) }));
       }
       else if (m.t === 'save-cues') {
+        // Two people editing at once (the LD and the SM in a tech): the second save would quietly wipe
+        // the first. The editor says which cue list it started from; if that has changed since, ask.
+        if (m.base != null && !m.force && String(m.base) !== cuesHash(show.cues)) throw new Error(`changed-elsewhere:${lastCueSave.name || 'another screen'} saved the cue list while you were editing`);
         saveCues(m.cues, who);
+        lastCueSave = { name: ctx.screenById?.(ws.screenId) || ctx.screenName?.(who) || who, at: Date.now() };
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));
         broadcast({ t: 'show', show: showSnapshot() });
       }
