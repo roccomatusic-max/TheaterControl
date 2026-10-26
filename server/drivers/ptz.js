@@ -1,7 +1,7 @@
 // PTZ cameras via VISCA.
 //  protocol "visca-ip"  : Sony VISCA-over-IP, UDP 52381, 8-byte header (Sony, many PTZOptics/Panasonic/Marshall in Sony mode)
 //  protocol "visca-tcp" : raw VISCA over TCP (PTZOptics/BirdDog/Lumens default port 5678)
-// Video is NOT carried here; see stream config + docs/VIDEO.md (go2rtc/MediaMTX → WebRTC in the browser).
+// Video is NOT carried here: the camera's "video" (rtsp://) address goes to the video relay, see server/video.js.
 const dgram = require('dgram');
 const net = require('net');
 const Driver = require('./base');
@@ -12,7 +12,7 @@ class PTZDriver extends Driver {
   constructor(cfg) {
     super(cfg);
     this.seq = 0;
-    this.state = { power: null, zoom: null, pan: null, tilt: null, lastPreset: null, presets: cfg.presets || [], stream: cfg.stream || null, tally: false };
+    this.state = { power: null, zoom: null, pan: null, tilt: null, lastPreset: null, presets: cfg.presets || [], stream: cfg.stream || (cfg.video ? { type: 'live', src: cfg.id } : null), tally: false, night: false };
   }
 
   start() {
@@ -84,6 +84,8 @@ class PTZDriver extends Driver {
       case 'home': return this.visca([0x81, 0x01, 0x06, 0x04, 0xff]);
       case 'power': return this.visca([0x81, 0x01, 0x04, 0x00, a.on ? 0x02 : 0x03, 0xff]);
       case 'tally': this.patch({ tally: !!a.on }); return this.visca([0x81, 0x01, 0x7e, 0x01, 0x0a, 0x00, a.on ? 0x02 : 0x03, 0xff]);
+      // Night mode: takes the infrared-cut filter out (Sony CAM_ICR), for cameras that see in the dark.
+      case 'night': this.patch({ night: !!a.on }); return this.visca([0x81, 0x01, 0x04, 0x01, a.on ? 0x02 : 0x03, 0xff]);
       default: return super.command(cmd);
     }
   }

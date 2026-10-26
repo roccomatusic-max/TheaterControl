@@ -144,6 +144,14 @@ module.exports = function createCrew({ cfg, show, savePath, statePath, writeJson
 
   return {
     snapshot, script,
+    // The backup computer keeps a copy of the crew screens as they run (features/failover.js), so
+    // calls, checklist ticks, the house status and standby answers carry on if it takes over.
+    mirror(c) {
+      if (!c || typeof c !== 'object') return;
+      for (const k of ['notes', 'calls', 'foh', 'countdown', 'lobby', 'checks', 'lights']) if (k in c) st[k] = c[k];
+      st.acks = { index: show.index, roles: c.acks || {} };
+      changed();
+    },
     // Handles a { t: 'crew', op } message; returns what to reply with.
     handle(m, who) {
       const fn = ops[m.op];

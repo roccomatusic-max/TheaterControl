@@ -73,11 +73,7 @@
           "label": "Wide"
         }
       ],
-      "stream": {
-        "type": "go2rtc",
-        "url": "http://10.101.50.5:1984",
-        "src": "cam1"
-      }
+      "video": "rtsp://10.101.60.11:554/2"
     },
     {
       "id": "projL",

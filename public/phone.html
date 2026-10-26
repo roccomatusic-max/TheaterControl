@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="icon.svg">
+<title>Phone camera · Show Control</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #0b0d10; color: #e7eaee; font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { padding: calc(12px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0; }
+  video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 12px; object-fit: cover; }
+  .box { position: relative; }
+  .tag { position: absolute; left: 10px; top: 10px; background: #000a; padding: 3px 10px; border-radius: 99px; font-weight: 700; font-size: 13px; }
+  .tag.on { background: #e5484d; }
+  label { display: grid; gap: 4px; font-size: 13px; color: #8b94a1; }
+  input, select { font: inherit; font-size: 18px; color: #e7eaee; background: #000; border: 1px solid #2a3039; border-radius: 10px; padding: 10px; }
+  button { font: inherit; font-size: 20px; font-weight: 800; color: #04140a; background: #1fbf5a; border: 0; border-radius: 12px; min-height: 60px; }
+  button.stop { background: #3a1416; color: #ffb4b6; border: 2px solid #e5484d; }
+  .row { display: flex; gap: 10px; } .row > * { flex: 1; min-width: 0; } input, select { width: 100%; }
+  #status { color: #8b94a1; min-height: 1.4em; } #status.bad { color: #ffb4b6; }
+  p { margin: 0; color: #8b94a1; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Phone camera</h1>
+  <div class="box"><video id="preview" autoplay muted playsinline></video><span id="tag" class="tag">Not sending</span></div>
+  <div class="row">
+    <label>Name on the iPad <input id="name" maxlength="30" placeholder="e.g. Wings SL"></label>
+    <label>Camera <select id="facing"><option value="environment">Back</option><option value="user">Front</option></select></label>
+  </div>
+  <button id="go">Start sending</button>
+  <div id="status"></div>
+  <p>Keep this screen on and the phone plugged in: the phone stops the camera when its screen locks. The picture appears on the Cameras tab, and can be recorded with the show.</p>
+</main>
+<script src="player.js"></script>
+<script>
+// A spare phone as a wings camera: sends its camera to Show Control (WebRTC into the video relay).
+// Phones only allow the camera on a secure (https) page, so this page is opened on Show Control's HTTPS port.
+'use strict';
+const $ = id => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+let ws, stream = null, pc = null, slot = null, seq = 0, sending = false, retry;
+const pending = {};
+const say = (t, bad) => { $('status').textContent = t; $('status').className = bad ? 'bad' : ''; };
+$('name').value = localStorage.getItem('phoneName') || '';
+$('facing').value = localStorage.getItem('phoneFacing') || 'environment';
+
+if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+  say('This page needs the secure address (https://…) from System > Camera screens and phone cameras on the iPad.', true);
+  $('go').disabled = true;
+}
+
+function ask(t, payload) { const id = ++seq; ws.send(JSON.stringify({ t, id, ...payload })); return new Promise(r => (pending[id] = r)); }
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws`);
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.t === 'auth-required') {
+      const pin = localStorage.getItem('pin');
+      if (q.get('key')) ws.send(JSON.stringify({ t: 'auth', key: q.get('key') }));
+      else if (pin) ws.send(JSON.stringify({ t: 'auth', pin }));
+      else { const p = prompt('Show Control PIN'); if (p != null) { localStorage.setItem('pin', p); ws.send(JSON.stringify({ t: 'auth', pin: p })); } }
+    } else if (m.t === 'auth-failed') { localStorage.removeItem('pin'); say('Wrong PIN, or an old link. Scan the code on the iPad again.', true); }
+    else if (m.t === 'init') { document.cookie = `sc=${m.token}; path=/; SameSite=Strict; Secure`; say(sending ? 'Reconnected.' : 'Connected to Show Control. Tap Start sending.'); if (sending) startPeer(); }
+    else if (m.t === 'reply' || m.t === 'error') { pending[m.id]?.(m.t === 'reply' ? m.data : { error: m.msg }); delete pending[m.id]; }
+  };
+  ws.onclose = () => { slot = null; if (pc) { pc.close(); pc = null; } if (sending) say('Lost Show Control. Reconnecting…', true); setTimeout(connect, 2000); };
+}
+
+async function startPeer() {
+  clearTimeout(retry);
+  const r = await ask('phone-start', { name: $('name').value.trim() || 'Phone' });
+  if (r.error) { say(r.error, true); return stop(); }
+  slot = r.slot;
+  pc = new RTCPeerConnection();
+  for (const track of stream.getTracks()) {
+    const tr = pc.addTransceiver(track, { direction: 'sendonly' });
+    // H.264 first: the recorder can only store H.264 video
+    const caps = RTCRtpSender.getCapabilities?.('video')?.codecs;
+    if (track.kind === 'video' && caps && tr.setCodecPreferences) tr.setCodecPreferences([...caps.filter(c => /h264/i.test(c.mimeType)), ...caps.filter(c => !/h264/i.test(c.mimeType))]);
+  }
+  pc.onconnectionstatechange = () => {
+    if (pc?.connectionState === 'connected') { say('Sending to Show Control.'); $('tag').textContent = 'LIVE'; $('tag').className = 'tag on'; }
+    if (pc?.connectionState === 'failed') { say('Video connection lost. Trying again…', true); restartPeer(); }
+  };
+  try { await LiveVideo.signal(pc, `dst=${slot}`); }
+  catch (e) { say(`Show Control could not take the video: ${e.message}`, true); restartPeer(); }
+}
+function restartPeer() {
+  if (pc) { pc.close(); pc = null; }
+  if (slot) { ws.send(JSON.stringify({ t: 'phone-stop', slot })); slot = null; }
+  retry = setTimeout(() => sending && ws.readyState === 1 && startPeer(), 3000);
+}
+
+async function start() {
+  localStorage.setItem('phoneName', $('name').value.trim());
+  localStorage.setItem('phoneFacing', $('facing').value);
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: $('facing').value, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 25 } } });
+  } catch (e) { return say(`The camera could not start: ${e.message}. Allow camera access for this page in the phone's settings.`, true); }
+  $('preview').srcObject = stream;
+  sending = true;
+  $('go').textContent = 'Stop sending'; $('go').className = 'stop';
+  try { await navigator.wakeLock?.request('screen'); } catch { /* not allowed */ }
+  startPeer();
+}
+function stop() {
+  sending = false; clearTimeout(retry);
+  if (pc) { pc.close(); pc = null; }
+  if (slot && ws.readyState === 1) ws.send(JSON.stringify({ t: 'phone-stop', slot }));
+  slot = null;
+  stream?.getTracks().forEach(t => t.stop()); stream = null; $('preview').srcObject = null;
+  $('go').textContent = 'Start sending'; $('go').className = '';
+  $('tag').textContent = 'Not sending'; $('tag').className = 'tag';
+}
+$('go').onclick = () => (sending ? stop() : start());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && sending) navigator.wakeLock?.request('screen').catch(() => {}); });
+connect();
+</script>
+</body>
+</html>

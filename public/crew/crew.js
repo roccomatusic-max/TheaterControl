@@ -76,14 +76,14 @@ function drawLastCall() {
 function draw() {
   if (!C.ready) return;
   if (picking || (me().role !== '-' && !C.crew.roles.includes(me().role))) return picker();
-  $('#who').textContent = me().role === '-' ? me().name : `${me().role} · ${me().name}`;
+  $('#who').textContent = me().role === '-' || me().role === me().name ? me().name : `${me().role} · ${me().name}`;
   lastLightKey = '';
   const role = me().role;
   fill(page, h('div', { style: 'max-width:720px;margin:0 auto;display:grid;gap:10px' },
     role !== '-' && lightEl, lastCall,
     role !== '-' && h('div', { class: 'card' }, h('h3', {}, showAll ? 'All cues' : 'My cues', h('button', { onclick: () => { showAll = !showAll; drawSheet(); draw(); } }, showAll ? 'Only mine' : 'Show all')), sheet),
     h('div', { class: 'card' }, h('h3', {}, 'Show night checklist', h('button', { onclick: () => { showChecks = !showChecks; drawChecks(); } }, showChecks ? 'Hide' : 'Open')), checks),
-    h('button', { onclick: () => { picking = true; draw(); } }, 'Change name or job')));
+    h('button', { class: 'leave', onclick: () => { picking = true; draw(); } }, 'Change name or job')));
   drawLight(); drawSheet(); drawChecks(); drawLastCall();
 }
 

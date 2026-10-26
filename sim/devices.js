@@ -7,21 +7,49 @@ const osc = require('../server/lib/osc');
 const log = (who, msg) => process.env.SHOW_QUIET || console.log(`[sim ${who}] ${msg}`);
 
 // ---------- ETC Eos (OSC over TCP/SLIP) ----------
+// Answers like a console: GO/back/fire, command lines, subs, and "get" requests for the cue list
+// and the patch (40 cues in list 1; 48 stage channels plus house lights on 501-504).
+const EOS_LABELS = ['Preshow', 'Overture', 'Opening', 'Street', 'Blackout', 'Ballad', 'Chase', 'Finale'];
+const EOS_SCENES = { 1: 'Preshow', 3: 'Act 1 · Opening', 9: 'Act 1 · The street', 17: 'Act 1 · Finale', 21: 'Act 2 · Entr\'acte', 30: 'Act 2 · The ball' };
+const EOS_FIXTURES = [['ETC', 'Source Four 26°', 'R02'], ['ETC', 'Source Four PAR', 'L201'], ['ETC', 'ColorSource Spot', ''], ['Chauvet', 'Rogue R2 Wash', '']];
 function eosSim(port) {
-  const cues = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, label: ['Preshow', 'Overture', 'Opening', 'Street', 'Blackout', 'Ballad', 'Chase', 'Finale'][i % 8] }));
+  const cues = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, label: EOS_LABELS[i % 8], up: i % 5 === 4 ? 0 : 3000, down: i % 5 === 4 ? 0 : i % 3 === 0 ? 5000 : 3000,
+    follow: i % 8 === 6 ? 2000 : -1, scene: EOS_SCENES[i + 1] || '', notes: i === 4 ? 'Thunder: snap with the sound cue' : '' }));
+  const patch = [...Array.from({ length: 48 }, (_, i) => ({ chan: i + 1, label: `${i < 12 ? 'FOH' : i < 24 ? 'Elec 1' : i < 36 ? 'Elec 2' : 'Cyc'} ${(i % 12) + 1}`, fx: EOS_FIXTURES[Math.floor(i / 12)], address: i + 1 })),
+    ...Array.from({ length: 4 }, (_, i) => ({ chan: 501 + i, label: `House ${i + 1}`, fx: ['ETC', 'Dimmer', ''], address: 501 + i }))];
   let active = -1;
   const text = c => (c ? `1/${c.n} ${c.label} 3.0 100%` : '');
   net.createServer(sock => {
     const send = (a, args = []) => sock.write(osc.slipEncode(osc.encode(a, args)));
-    const pushCues = () => { send('/eos/out/active/cue/text', [text(cues[active])]); send('/eos/out/pending/cue/text', [text(cues[active + 1])]); send('/eos/out/active/cue', [{ type: 'f', value: 1 }]); };
+    const pushCues = () => {
+      send('/eos/out/active/cue/text', [text(cues[active])]); send('/eos/out/pending/cue/text', [text(cues[active + 1])]); send('/eos/out/active/cue', [{ type: 'f', value: 1 }]);
+      if (cues[active]) send(`/eos/out/active/cue/1/${cues[active].n}`, [{ type: 'f', value: 1 }]);
+      if (cues[active + 1]) send(`/eos/out/pending/cue/1/${cues[active + 1].n}`, []);
+    };
     send('/eos/out/show/name', ['Sim Musical']); pushCues();
     const dec = new osc.SlipDecoder(p => {
       const { address, args } = osc.decode(p);
+      let m;
       if (address === '/eos/ping') send('/eos/out/ping');
       else if (address === '/eos/key/go_0') { active = Math.min(active + 1, cues.length - 1); log('eos', `GO → ${active + 1}`); pushCues(); }
       else if (address === '/eos/key/stop') { active = Math.max(active - 1, -1); pushCues(); }
       else if (/^\/eos\/cue\/\d+\/[\d.]+\/fire$/.test(address)) { active = Math.max(0, Math.round(Number(address.split('/')[4])) - 1); log('eos', `fire cue ${active + 1}`); pushCues(); }
       else if (address === '/eos/newcmd') { log('eos', `cmd: ${args[0]}`); send('/eos/out/cmd', [`LIVE: Cmd: ${args[0]}`]); }
+      else if (address === '/eos/get/cue/1/count') send('/eos/out/get/cue/1/count', [cues.length]);
+      else if ((m = address.match(/^\/eos\/get\/cue\/1\/index\/(\d+)$/)) && cues[m[1]]) {
+        const c = cues[m[1]];
+        // uid, label, up time, up delay, down time, down delay, focus/colour/beam times and delays, preheat,
+        // curve, rate, mark, block, assert, link, follow time, hang time, all fade, loop, solo, timecode,
+        // part count, notes, scene, scene end, part index
+        send(`/eos/out/get/cue/1/${c.n}/0/list/${m[1]}/${cues.length}`, [`uid-${c.n}`, c.label, c.up, 0, c.down, 0, -1, -1, -1, -1, -1, -1, 'F', '', 100, '', '', 'F', '', c.follow, -1, 'F', 0, 'F', '', 0, c.notes, c.scene, 'F', 0]);
+      }
+      else if (address === '/eos/get/patch/count') send('/eos/out/get/patch/count', [patch.length]);
+      else if ((m = address.match(/^\/eos\/get\/patch\/index\/(\d+)$/)) && patch[m[1]]) {
+        const x = patch[m[1]];
+        // uid, label, manufacturer, model, address, intensity address, level, gel, text 1-10, part count
+        send(`/eos/out/get/patch/${x.chan}/1/list/${m[1]}/${patch.length}`, [`uid-p${x.chan}`, x.label, x.fx[0], x.fx[1], x.address, x.address, 0, x.fx[2], '', '', '', '', '', '', '', '', '', '', 1]);
+      }
+      else if ((m = address.match(/^\/eos\/sub\/(\d+)$/))) log('eos', `sub ${m[1]} at ${Math.round((args[0] || 0) * 100)}%`);
       else if (address !== '/eos/subscribe' && address !== '/eos/user') log('eos', address);
     });
     sock.on('data', d => dec.push(d));
@@ -31,7 +59,9 @@ function eosSim(port) {
 
 // ---------- QLab (OSC over UDP, JSON replies) ----------
 function qlabSim(port) {
-  const cues = Array.from({ length: 30 }, (_, i) => ({ number: String(i + 1), name: ['House music', 'Preshow announce', 'Overture', 'Thunder', 'Door slam', 'Underscore', 'Bows'][i % 7] }));
+  const cues = Array.from({ length: 30 }, (_, i) => ({ number: String(i + 1), name: ['House music', 'Preshow announce', 'Overture', 'Thunder', 'Door slam', 'Underscore', 'Bows'][i % 7],
+    uniqueID: `Q${i + 1}`, type: i % 5 === 3 ? 'Video' : i % 7 === 6 ? 'Fade' : 'Audio' }));
+  cues[13].broken = '/Users/sound/Show/Video/Storm.mov'; // one video file "missing", to show the content check
   let ph = 0; const running = [];
   const s = dgram.createSocket('udp4');
   s.on('message', (m, r) => {
@@ -47,6 +77,11 @@ function qlabSim(port) {
     else if (address === '/cue/playhead/number') reply(cues[ph].number);
     else if (address === '/cue/playhead/displayName') reply(cues[ph].name);
     else if (address === '/runningCues/shallow') reply(running.map(name => ({ name })));
+    else if (address === '/cueLists') reply([{ uniqueID: 'L1', number: '', name: 'Main Cue List', type: 'Cue List', cues: cues.map(({ broken, ...c }) => c) }]);
+    else if (/^\/cue_id\/[^/]+\/valuesForKeys$/.test(address)) {
+      const c = cues.find(x => x.uniqueID === address.split('/')[2]);
+      if (c) reply({ isBroken: !!c.broken, fileTarget: c.type === 'Fade' ? undefined : c.broken || `/Users/sound/Show/${c.type}/${c.name}.${c.type === 'Video' ? 'mov' : 'wav'}` });
+    }
   });
   s.bind(port, () => log('qlab', `OSC/UDP on ${port}`));
 }

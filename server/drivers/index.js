@@ -6,6 +6,7 @@ const drivers = {
   qlab: require('./qlab'),
   'yamaha-tf': require('./yamaha-tf'),
   ptz: require('./ptz'),
+  camera: require('./camera'),
   pjlink: require('./pjlink'),
   panasonic: require('./panasonic'),
   shure: require('./shure'),
@@ -20,6 +21,7 @@ const drivers = {
   applemidi: require('./applemidi'),
   text: require('./text'),
   http: require('./http'),
+  pretend: require('./pretend'), // training mode only; not offered on the Setup screen (no meta)
 };
 
 const plugins = require('../plugins').load(drivers);

@@ -9,7 +9,9 @@ and used from an iPad or phone in a browser. It works with no internet.
 | Yamaha TF1/3/5 | Yamaha remote control protocol, TCP 49280 | Input + DCA + stereo faders and on/off, two-way (moves on the desk show on the iPad), scene recall |
 | QLab 4/5 | OSC over UDP 53000 | GO, stop, panic, pause/resume, playhead, start any cue; shows playhead + running cues |
 | PTZ cameras | VISCA-over-IP (UDP 52381) or raw VISCA TCP (5678) | Joystick pan/tilt, zoom, focus, presets (tap = recall, hold = store), tally, home, power |
-| Camera video | go2rtc / MediaMTX → WebRTC, or MJPEG/HLS | Live view on the iPad, low latency |
+| Camera video | RTSP from any IP camera, through the bundled go2rtc relay → WebRTC | Live view on iPads, phones and TVs (well under a second), several at once, pop-out, night view, snapshots to notes, recording with cue markers |
+| Fixed / infrared cameras | RTSP (Hikvision, Dahua, Axis, Reolink, Tapo…) | Video-only backstage and wings views |
+| Spare phones | WebRTC from the phone's browser | Any phone becomes an extra wings camera |
 | Panasonic projectors (PT-DZ13K, PT-DZ770 series) | Panasonic LAN protocol, TCP 1024 (+ PJLink for health) | Power with confirmation, shutter, inputs, lamp hours, fan/lamp/temperature health, lens home |
 | Shure ULX-D, QLX-D, SLX-D, Axient Digital receivers | Shure text protocol, TCP 2202 | Pack battery (bars + time left), signal, whether a pack is switched on |
 | Any PJLink projector / display | PJLink class 1, TCP 4352 | Power, shutter, inputs, lamp hours, health, make/model |
@@ -31,7 +33,8 @@ X32, Art-Net consoles and nodes, Sony-style cameras, QLab, Companion, HyperDeck.
 New kinds of equipment can be added as plugins without changing the app: see [plugins/README.md](plugins/README.md).
 
 **Show cues** tie it together: one GO can fire an Eos cue, a QLab cue, a TF scene and camera
-presets, with optional per-action delays. There are also show/act timers, a lock button so a
+presets, with optional per-action delays (a "Cameras follow cues" switch holds the cameras when
+you want to drive them by hand). There are also show/act timers, a lock button so a
 pocketed phone can't fire anything, and an optional PIN.
 
 <p>
@@ -53,6 +56,14 @@ Other people in the company open their own page on a phone, iPad or TV (same add
 Crew roles, the checklist and the script are saved in the show file under `"crew"`; give a cue crew tasks in
 Show → Edit cues. Notes, ticks and calls are kept across a restart. The 🌙 button on every screen switches
 that device to a dim, red-only night mode for backstage.
+
+**Kiosk screens** (a Chromebook, Android tablet or spare iPad that only ever shows one of these pages,
+e.g. a cue light on the fly floor): System → Stage manager and crew screens → *Kiosk…* gives a link
+and QR code, with the job fixed for a crew cue light (`/crew.html?kiosk=1&job=Fly%20floor`). Open it
+once on the device and it remembers. A kiosk screen goes full screen at the first tap, stays awake,
+hides the ways off the page (Change job, Full controls), reloads itself after 30 seconds without
+Show Control and warns when its battery is low. Press and hold the clock for 3 seconds to leave kiosk
+mode (it asks for the admin PIN, if there is one); `?kiosk=0` also turns it off.
 
 ## Easiest way to try it (Mac or Windows, nothing to install)
 
@@ -157,6 +168,185 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 
 <p><img src="docs/screenshots/ipad-mics.png" width="70%" alt="Mics tab on iPad: mic scene, packs with meters and batteries, feedback alert"></p>
 
+## Health, alerts and the pre-show check
+
+- **Pre-show check** (System > Pre-show check): one button tests every piece of equipment, the cue list
+  (standby at the top, timers at zero, cues that use equipment with no address) and this computer
+  (disk space). Each line is green, amber or red, with a one-tap fix where there is an obvious one.
+- **Ready dots**: every cue in the list has a dot that is green when all the equipment it uses is answering.
+- **Alerts**: one alert bar on every screen (with a beep, where the browser allows sound) for equipment
+  that was working and stopped answering for 5 seconds, the emergency stop, possible feedback and low
+  mic batteries (see Sound and mics). Equipment alerts clear when it answers again; several at once
+  become one line. Tap the status dots at the top to see how long each device has been up and how
+  often it dropped out.
+- **Phone alerts**: turn them on in the Health screen and subscribe to the private channel name in the free
+  [ntfy](https://ntfy.sh) app. Equipment drop-outs, the emergency stop, possible feedback, low mic batteries and an
+  unexpected restart of Show Control reach the phone even when the app is closed. Alerts that happen together are sent as
+  one message. The show computer needs internet for this (the control network). Settings are in the
+  show file: `"alerts": { "on": true, "ntfyTopic": "…", "ntfyServer": "https://ntfy.sh" }`.
+
+## Locks, PINs, undo and backups
+
+- **Lock button** (top right) offers two locks:
+  - **Lock the show**: every screen at once, and it survives a restart. GO, STOP, standby and the
+    everyday controls keep working. Editing or restoring cues, equipment setup, firing a cue out of
+    order, resetting timers and switching equipment off are refused until someone unlocks with the
+    operator or admin PIN.
+  - **Lock this screen**: only STOP works on that screen. Good for a phone in a pocket.
+- **Who can do what** (System tab): an admin PIN (everything; the same PIN as on the Setup screen),
+  an operator PIN (runs the show, edits cues) and a crew PIN (watch only). Optionally, crew can watch
+  without a PIN. With no PINs, there is no sign-in. The PINs apply in practice and live.
+- **What each screen may do** (System > Screens): set any iPad or phone to *Run the show* or *Crew &
+  watch only*, and choose what *new screens* may do, e.g. "Crew & watch only" before the crew arrive,
+  so a phone that opens Show Control can't press GO or change the setup. It works without PINs too.
+  A limit applies on top of the PIN (an operator PIN on a crew-only phone is crew-only); the admin
+  PIN and the show computer itself always get everything, so nobody is locked out. Screens are
+  recognised by an id kept on the device: this stops accidents, it is not a password. With a backup
+  computer, set the same limits on it too (each computer keeps its own).
+- **Two GOs at once**: a GO from another screen within half a second of the last one (the SM and the
+  operator, an iPad and a Stream Deck) is ignored, and that screen is told. `"show": { "goLockout": 0.5 }`
+  in the show file changes the time; 0 turns it off.
+- **Two people editing cues at once**: if someone else saved the cue list while you were editing,
+  Save asks before replacing their changes (theirs stay in Undo / history either way).
+- **Wrong PINs**: after 5 in a row, that iPad or phone has to wait before trying again (15 seconds,
+  then longer).
+- **Log file**: everything on the System tab's log is also kept in `Show Control/Logs/<date>.log`
+  (the newest 60 days), so what happened during last night's show can be looked up after a restart.
+- **A cue step that didn't work** (equipment not connected, refused, no answer) shows on every screen
+  straight away, one alert per piece of equipment, until it takes a cue step again.
+- **Cue list history**: every saved cue list is kept (the newest 200) in `Show Control/Cue list history`.
+  *Undo* puts back the one before the last save, and undoing again redoes. Any earlier version can
+  be put back, with a summary of what changed.
+- **Backups**: every night (03:00 by default, and on start-up if the last one is over a day old) into
+  `Show Control/Backups/<date>`. Each backup has the show files, what each device reported (mixer
+  channel names and levels, Eos show name, projector lamp hours) and any folders added on the System
+  tab, for example the QLab workspace when QLab runs on the show computer. The newest 30 are kept.
+  A cue list can be put back from any backup. The pre-show check warns when the last backup is
+  missing, old or had a problem.
+
+## Backup computer and spare screens
+
+- **Backup computer** (System > Backup computer): a second computer running Show Control, plugged
+  into both networks like the main one, with the same admin PIN. On the main computer choose "Main
+  computer" and type the backup's address; on the backup choose "Backup computer" and type the main
+  computer's address. Both settings are in each computer's own show file:
+  `"failover": { "role": "main", "peer": "<other computer>:8080" }`.
+  - The backup stays on standby. It copies the show as it runs (cue list, cue position, timers, the
+    show lock, settings) and never talks to the equipment.
+  - If the main computer stops answering for 5 seconds, the backup takes over with the show where it
+    was, connects to the equipment and sends an alert. The iPads and phones move across by themselves.
+  - When the main computer comes back, it waits on standby. Tap *Hand back to the main computer* on the
+    backup when it suits you (for example in the interval); the backup then restarts on standby.
+  - *Take over now* on the standby computer forces a switch. Only use it if the other one has really stopped.
+  - Crew screens carry on too: calls, checklist ticks, the house status, countdown and standby answers are copied.
+- **Spare screens**: every iPad, phone and computer has a name (System > Screens, *Rename*). If one
+  breaks or goes flat, open Show Control on a spare: it offers to carry on from the screen that dropped
+  off, with the same name, tab, camera and projector group. *Carry on here* on the Screens card does
+  the same at any time.
+
+## Running the show: reports, scene map, rehearsal jump, second operator
+
+- **Show report**: every GO (with what each piece of equipment answered), equipment that stopped
+  answering, emergency stops, jumps, crew notes and calls. A few minutes after the last cue it is saved
+  as a PDF in `Show Control/Show reports` and sent to the phone with the phone alerts (System > Show
+  reports to change the wait, the paper size, or to make one by hand). A GO from the top after the end
+  starts the next report, so a matinee and an evening get one each. A run that never reaches the last
+  cue is finished after 4 hours without a GO.
+- **Scene map** (Show > Scene map): the whole show as a timeline with a lane per department (lighting,
+  sound, projection, cameras, crew), timed from the last full show, and a cue-by-cue table. Give the
+  first cue of a scene a scene name in *Edit cues* to see the scenes.
+- **Rehearsal jump** (Show > Jump to…, or tap a cue on the scene map): sets the equipment as it would
+  be at that point without running the cues in between. For each device it repeats the last thing the
+  cue list told it to do (Eos cue, snapped with no fade or with its own fade, then any GOs; mixer scene
+  and levels; camera presets; projector power, shutter and input), fades out QLab and moves its
+  playhead to the next sound cue. Macros and command lines are listed, not repeated. Not allowed
+  while the show is locked.
+- **Second operator** (Show > Second operator): a deputy runs one department (say sound) from their
+  own screen with its own GO and their own place in the cue list, on the stage manager's call. The
+  main GO leaves that department out until it is handed back. Each device's department comes from its
+  type; `"dept": "proj"` on a device in the show file overrides it.
+
+## Buttons, MIDI and timecode
+
+Set up on System > Buttons, MIDI and timecode.
+
+- **Keyboard, foot pedal or page turner**: switch it on per screen. Space, Enter, Page Down or → is
+  GO; Page Up or ← moves standby back one cue. A Bluetooth page-turner pedal works on the iPad.
+- **Stream Deck and button boxes**: switch on the remote web address (admin). Each button calls
+  `http://<show computer>:8080/remote/<key>/go` (or `back`, `next`, `stop`, `fire/<cue number>`,
+  `dept/<department>`, `state`). In Bitfocus Companion use a "Generic: HTTP Requests" connection.
+  The key is in the show file (`"remote": { "key": … }`), so treat it like a PIN.
+- **OSC** (off until switched on, UDP port 53535): `/showcontrol/go`, `/back`, `/next`, `/stop`,
+  `/fire <cue>`, `/dept/<department>/go`, `/timecode "01:02:03:04"`. A value of 0 (a button being
+  let go) is ignored. Works from Companion, TouchOSC, QLab Network cues and Eos cues.
+- **MIDI**: tap *Learn GO* (or Back, STOP, a department's GO) and press the MIDI button. MIDI arrives
+  from network MIDI equipment, or from a MIDI device plugged into a computer that has Show Control
+  open in Chrome or Edge with "Use MIDI devices plugged into this computer" on. MIDI Show Control GO
+  from a console can run GO (with a cue number it fires the cue with that number).
+- **Timecode**: give a cue a timecode in *Edit cues* and switch on *Fire cues at their timecode*.
+  MIDI timecode (from QLab or a playback computer) or OSC timecode fires each cue as it plays past
+  it. A jump in the timecode (scrubbing or a locate) fires nothing. The pre-show check warns when
+  following is off or no timecode has arrived.
+
+Buttons, OSC and MIDI go through the same checks as an operator's screen: the show lock applies, and
+a backup computer on standby ignores them.
+
+## Lighting: house lights, the console's cue list, channel check
+
+- **House lights**: set up on System > House lights. They can be a submaster on the Eos (faded
+  smoothly from here), channels on the Eos (`Chan 501 Thru 504 At 40 Time 5`), one Eos macro per
+  look, or their own DMX box (a "DMX over the network" device). Four looks (Full, Preshow, Half, Out)
+  with your own levels, buttons on the Show and Lighting tabs, and a "House lights" step for any cue.
+  Optionally, holding STOP brings them to Full. The rehearsal jump puts them where the cue list left
+  them.
+- **Cue list on the console** (Lighting tab): the Eos cue list read from the console, with labels,
+  times, follows, scenes and notes, the live cue in green and the next in yellow. Tap a cue for its
+  details, to fire it, or to add it to the show's cue list; "Add cues to the show's cue list" adds
+  several at once, each in its place. The pre-show check warns when a show cue fires a lighting cue
+  the console doesn't have.
+- **Channel check** (Lighting tab, made for a phone): each channel comes on by itself at 50%, 75% or
+  Full. Tap OK or Problem (lamp out, wrong colour, focus…) and the next one comes on. Labels, fixture
+  types and gels come from the Eos patch. At the end every channel goes back to how the console had
+  it. Problems stay on a "To fix" list and in the pre-show check until marked fixed.
+
+Not yet tried on a real console: reading the cue list and patch over OSC, `Time` on a channel level,
+and the console's "cues changed" notices. The simulator answers the way the Eos documentation says.
+
+## Several shows and training mode
+
+- **Shows** (System tab): keep more than one show on the computer, each with its own equipment, cue
+  list, mic plot and cue list history, for another production or another venue. *Start a new show*
+  keeps the same equipment with an empty cue list (or copies everything); *Switch to this* restarts
+  Show Control with the other show (about 10 seconds; every screen reconnects), and each show comes
+  back at the cue where it was left. *Download* gives a show file to take to another computer, and
+  *Add from a file* brings one in. This computer's own settings (PINs, phone alerts, backups, the
+  backup computer) stay as they are when switching, and are never in a downloaded file. Shows live
+  in `Show Control/Shows`.
+- **Training mode** (System tab): new operators practise on a copy of the real show with pretend
+  equipment. Each piece of equipment talks to a simulator of the same kind, or to a stand-in that
+  says yes to everything, so nothing real moves and nothing reaches the real show. The trainer can
+  make any piece of equipment stop answering, or refuse its next command, to practise the alerts.
+  The top of every screen is striped purple while training. *End training* goes back to the real
+  show, at the cue where it was. Training's own cue list history and reports are in
+  `Show Control/Training`. The real show isn't running while training, so don't start it during a
+  performance; the backup computer doesn't copy it or take over meanwhile.
+
+## Updates
+
+System > Updates updates Show Control from the iPad in one tap (the Mac and Windows downloads).
+It asks GitHub for the newest release (the show computer needs internet, which the control network
+gives it), shows what's new, downloads the version for this computer, checks it, unpacks it into
+`Show Control/App versions` and restarts into it: about 20 seconds, and every screen reconnects.
+The folder you double-click stays the same, and starting with the computer keeps working.
+
+- If the new version doesn't start (or isn't running within two minutes), Show Control goes back to
+  the one before by itself and an alert says so.
+- *Go back to …* returns to the previous version at any time.
+- No internet on the show computer: download the .zip on a phone or another computer and send it
+  from the same card.
+- Updating is blocked while the show is locked and in training mode. The backup computer can be
+  updated while it's on standby.
+
 ## Projection
 
 The **Projection** tab works like Projector Control, without mapping. It has:
@@ -185,23 +375,60 @@ from Projector Control.
 
 ## Video
 
-Browsers (especially iPad Safari) can't play RTSP or NDI directly. Run **go2rtc** on the server
-(`deploy/go2rtc.yaml`). It pulls each camera's RTSP once and serves WebRTC to every tablet with
-well under a second of delay. In the camera config:
+Live camera video works out of the box. Show Control runs **go2rtc** (a small video relay,
+included in the Mac and Windows downloads) and writes its settings from the camera list.
+go2rtc pulls each camera's RTSP feed once and hands it to every iPad as WebRTC, with well under
+a second of delay. It only listens on the show computer; iPads reach it through Show Control at
+`/video`, behind the same PIN. If WebRTC can't get through, the iPad falls back to HLS (Safari)
+or an MP4 stream.
 
-```json
-"stream": { "type": "go2rtc", "url": "http://<server>:1984", "src": "cam1" }
-```
+- **Adding a camera:** System → Equipment setup, type the camera's address, then **Find video**.
+  It tries the usual RTSP addresses for PTZOptics, Sony, Panasonic, Marshall, Lumens, AVer,
+  BirdDog, Canon, Hikvision, Dahua, Axis, Reolink and Tapo, asks for the camera's login if needed,
+  and fills in the one that works. In a show file it is the camera's `"video"` field:
+  `"video": "rtsp://10.101.60.11:554/2"`. Use the camera's smaller (sub) stream, in H.264.
+- **Cameras tab:** one camera with controls, **All** (grid, or one big with the rest small), ⧉ to
+  pop a camera out so it stays on screen over other tabs and apps, 🔆 low-light view for dark areas,
+  📷 snapshot to notes, ⤢ full screen. **IR** switches a PTZ camera's infrared night mode
+  (Sony VISCA CAM_ICR; not every camera has it). The Show tab can keep a camera in view too.
+- **Recording:** ● Record (or "Record when the show timer starts") saves every camera with video to
+  `Show Control/Recordings/<date time show>/`, one MP4 per camera, straight from the camera (no
+  re-encoding). Every GO, note and mark is saved with its time, so **Recordings → Watch** jumps
+  to any cue. If a camera drops out it carries on in a new part file.
+- **Notes:** 📷 on any camera grabs a picture; add a line and it is kept with the time and cue.
+  **Notes → Export all** makes one page with every note and picture, to print or send.
+- **Screens:** System → Camera screens and phone cameras gives a **backstage TV** link (camera, standby
+  cue, running time, clock) and a **lobby screen** link (camera, show name, clock), with QR codes.
+  Open them in a smart TV's browser. They use a view-only key, so a screen can't fire anything.
+- **Phone cameras:** the same card has a link for a spare phone. Phones only allow the camera on a
+  secure page, so Show Control also serves HTTPS on port 8443 (the HTTP port + 363) with a
+  certificate it makes itself; the phone warns once that it isn't private. Up to four phones.
+- **Focus helper** (Lighting tab): watch a camera while you select a channel and nudge pan, tilt,
+  zoom, edge and iris with the Eos encoder wheels. Not yet tried on a real console.
+- **Content check** (Projection tab): asks QLab for every cue it reports as broken (missing audio
+  or video files), and lists the projectors' power, input and shutter, and camera connections.
+  **Black out all** closes every shutter and works with the screen locked; **Restore** reopens
+  only the ones that were open.
 
-Other options: `"mediamtx"` (MediaMTX WebRTC page), `"mjpeg"` (camera's own MJPEG URL),
-`"hls"` (works natively on iOS, a few seconds of delay), `"iframe"`.
-For NDI|HX cameras, turn on their RTSP output, or bridge NDI to RTSP on the server.
-For recording or streaming the show, OBS on the server can take the same feeds.
+Ports on the show computer: 8555 (TCP and UDP) for WebRTC video to iPads, 8443 for the phone page.
+go2rtc's own API (18984) and RTSP (18554) only listen on the show computer itself; OBS or VLC on
+that computer can take `rtsp://127.0.0.1:18554/<camera id>`. Change them with `"video":
+{ "webrtcPort", "apiPort", "rtspPort" }` and `"server": { "httpsPort" }` in the show file.
+
+Running from source: `node scripts/package.js video` downloads go2rtc for your computer into
+`runtime/`, or set `GO2RTC_BIN`, or put `go2rtc` on the PATH. Without it everything else works and
+the Cameras tab says live video is not installed. The older `"stream"` options (`go2rtc`,
+`mediamtx`, `mjpeg`, `hls`, `iframe`) still work for a relay you run yourself.
+
+NDI cameras: turn on their RTSP output (most NDI|HX PTZs have one).
 
 ## How it's built
 
 ```
 server/index.js          HTTP + WebSocket hub, show cue stack, timers, PIN, log
+server/features/*.js     self-contained features (health, …) that plug into index.js through ctx
+server/video.js          runs the go2rtc video relay and passes /video through to it
+server/recorder.js       show recordings with cue markers; server/notes.js snapshot notes
 server/drivers/*.js      one driver per device type; each exposes status, state, command()
 server/catalog.js        the "Add equipment" list: makes/models → driver, defaults, set-up steps
 server/discover.js       "Find equipment on the network"
@@ -216,6 +443,10 @@ Adding a device type means adding one file in `server/drivers/` and one line in 
 (or dropping a plugin file in `plugins/`). Adding another brand of something already supported is
 one line in `server/catalog.js`.
 
+Adding a feature means one file in `server/features/` (it gets `ctx`: devices, show, log, broadcast,
+settings, and `handlers` for extra WebSocket requests), plus a script in `public/` that uses the
+extension points at the top of `public/app.js` (`VIEWS`, `SYS_CARDS`, `onMsg`, `ask`).
+
 ## Next ideas
 
 - Projection mapping (shared with Projector Control's mapping module)
@@ -223,4 +454,3 @@ one line in `server/catalog.js`.
 - MIDI timecode out
 - LTC/MTC display and chase, Clear-Com/Green-GO comms status
 - Backstage and front-of-house paging through QLab
-- Per-user roles (SM: GO only; TD: everything)

@@ -32,12 +32,23 @@ const KINDS = {
   ptz: {
     label: 'PTZ camera', idBase: 'cam',
     fields: [['protocol', 'select:visca-ip=VISCA over IP (Sony, BirdDog and most others)|visca-tcp=VISCA over TCP (PTZOptics, Lumens)', 'Control method'],
-      ['port', 'port', 'Port (leave empty for the usual one)', '52381 or 5678']],
+      ['port', 'port', 'Port (leave empty for the usual one)', '52381 or 5678'], ['video', 'video', 'Video address', 'rtsp://… (tap Find video)']],
     help: [
       'Plug the camera into the show network switch (PoE cameras get their power from it too).',
       'Find the camera\'s address (its manual, its on-screen menu, or the maker\'s finder app) and type it into a web browser to open its settings page.',
       'In its network settings, choose a fixed (static) address, and make sure VISCA over IP is turned on. Note the port number it shows.',
-      'Type the address in the Address box, pick the control method that matches, and tap Test.',
+      'Make sure RTSP (video streaming) is turned on too; on most cameras it is on already.',
+      'Type the address in the Address box, pick the control method that matches, and tap Test. Then tap Find video to fill in the video address.',
+    ],
+  },
+  camera: {
+    label: 'Fixed or infrared camera (video only)', idBase: 'view',
+    fields: [['video', 'video', 'Video address', 'rtsp://… (tap Find video)']],
+    help: [
+      'For a backstage, wings or fly-floor camera that does not move: any IP camera with RTSP video (Hikvision, Dahua, Axis, Reolink, Tapo and most others). An infrared one sees in the dark.',
+      'Plug it into the show network switch and give it a fixed address in its settings page or app. Turn on RTSP if it has a switch for it.',
+      'Type the address in the Address box and tap Find video. If it asks, type the camera\'s own username and password.',
+      'On the Cameras tab, the 🔆 button brightens the picture for dark areas.',
     ],
   },
   panasonic: {
@@ -84,13 +95,29 @@ function kindFor(st, d) {
 const ID_BASE = { lighting: 'lx', sound: 'mixer', playback: 'play', cameras: 'cam', projection: 'proj', effects: 'fx', other: 'dev' };
 const kindLabel = t => KINDS[t]?.label || S.setup?.types?.[t]?.label || t;
 
-function ask(t, payload = {}, ms = 20000) {
-  const id = ++cmdSeq;
-  send({ t, id, ...payload });
-  return new Promise(res => {
-    pending[id] = r => res(typeof r === 'string' ? { error: r } : r === true ? {} : r);
-    setTimeout(() => { if (pending[id]) { delete pending[id]; res({ error: 'No answer from Show Control' }); } }, ms);
-  });
+// The camera's video address, with "Find video": tries the usual addresses for common makes
+// of camera and fills in the one that works. Asks for the camera's login if the video needs one.
+function videoField(d, label, ph, edited, redraw) {
+  const st = (S.setup.videoFind ||= {})[d.id] ||= {};
+  const input = h('input', { type: 'text', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', value: d.video || '', placeholder: ph,
+    onchange: e => { const v = e.target.value.trim(); if (v) d.video = v; else delete d.video; st.result = null; edited(); } });
+  const find = async () => {
+    if (!d.host && !d.video) return toast('Type the camera\'s address first', 4000);
+    st.running = true; st.result = null; redraw();
+    const r = d.video && !st.login ? await ask('find-video', { url: d.video }) : await ask('find-video', { host: d.host, user: st.user || d.username || '', pass: st.pass || d.password || '' }, 120000);
+    st.running = false;
+    st.result = r.error ? { ok: false, detail: r.error } : r;
+    if (r.ok && r.url) { d.video = r.url; edited(); }
+    if (r.needsPassword) st.login = true;
+    redraw();
+  };
+  const r = st.result;
+  return h('label', { class: 'videofield' }, label,
+    h('div', { class: 'row' }, input, h('button', { class: 'always', style: 'flex:0 0 auto', disabled: st.running, onclick: e => { e.preventDefault(); find(); } }, st.running ? 'Looking…' : d.video ? 'Check' : 'Find video')),
+    st.login && h('div', { class: 'row' },
+      h('input', { placeholder: 'Camera username', autocomplete: 'off', autocapitalize: 'off', value: st.user || '', oninput: e => (st.user = e.target.value.trim()) }),
+      h('input', { type: 'password', placeholder: 'Camera password', autocomplete: 'off', value: st.pass || '', oninput: e => (st.pass = e.target.value) })),
+    r && h('span', { class: `vres ${r.ok ? 'ok' : 'bad'}` }, `${r.ok ? '✓' : '✗'} ${r.detail}${r.ok && r.brand ? ` (usual ${r.brand} address)` : ''}${r.ok && r.codec && !/H264/.test(r.codec) ? ' This camera sends ' + r.codec + ': if the picture does not show on the iPad, set its stream to H.264 in its settings.' : ''}`));
 }
 
 // "10.101.something" for a 255.255.0.0 network: the part of the address every device must share.
@@ -138,6 +165,7 @@ function deviceCard(st, d, i, { open = false } = {}) {
   const edit = () => { st.dirty = true; delete st.tests[d.id]; };
   const fieldEl = ([key, type, label, ph]) => {
     const val = d[key] ?? '';
+    if (type === 'video') return videoField(d, label, ph, edit, redrawKeepScroll);
     const set = v => { if (v === '' || v == null) delete d[key]; else d[key] = v; edit(); };
     let input;
     if (type.startsWith('select:')) {
