@@ -36,6 +36,7 @@ module.exports = function screens(ctx) {
     const from = list.get(clean(m.from, 40));
     if (!from) throw new Error('That screen is no longer listed.');
     if (from.connected && !m.force) throw new Error(`${from.name} is still connected. Carry on from it anyway?`);
+    ctx.access?.carryLimit?.(from.id, ws);
     list.delete(from.id);
     const me = list.get(ws.screenId);
     if (me) { me.name = from.name; me.view = from.view; }

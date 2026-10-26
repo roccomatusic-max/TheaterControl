@@ -78,6 +78,14 @@ function connect({ screen, pin, from = '127.0.0.2' } = {}) {
   assert.equal(local.init.role, 'admin', 'the show computer itself always gets everything');
   local.ws.close();
 
+  // a spare phone carrying on from the crew phone is limited like it
+  const spare = await connect({ screen: 'sspare001' });
+  await spare.ask({ t: 'screen-hello', screen: 'sspare001', name: 'Spare', view: {} });
+  assert.ok(!(await spare.ask({ t: 'screen-takeover', from: 'sphone001', force: true })).error);
+  await wait(300);
+  assert.equal(spare.init.role, 'viewer', 'a spare for a crew phone is a crew phone');
+  spare.ws.close();
+
   // ---- new screens start limited; the screen that set it keeps full control ----
   const n = await ipad.ask({ t: 'screen-limit-set', newScreens: 'operator' });
   assert.equal(n.newScreens, 'operator');
@@ -125,7 +133,7 @@ function connect({ screen, pin, from = '127.0.0.2' } = {}) {
   const mine = JSON.parse(JSON.stringify(ipad.show.cues)); mine[0].label = 'Edited on the iPad';
   const theirs = JSON.parse(JSON.stringify(ipad.show.cues)); theirs[1].label = 'Edited on the phone';
   assert.ok(!(await again.ask({ t: 'save-cues', cues: theirs, base })).error, 'first save goes in');
-  assert.match((await ipad.ask({ t: 'save-cues', cues: mine, base })).error || '', /^changed-elsewhere:Fly floor saved the cue list/);
+  assert.match((await ipad.ask({ t: 'save-cues', cues: mine, base })).error || '', /^changed-elsewhere:.+ saved the cue list while you were editing/);
   assert.ok(!(await ipad.ask({ t: 'save-cues', cues: mine, base, force: true })).error, 'saved anyway when asked to');
   await wait(200);
   assert.equal(ipad.show.cues[0].label, 'Edited on the iPad');

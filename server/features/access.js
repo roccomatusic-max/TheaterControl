@@ -40,6 +40,17 @@ module.exports = function access(ctx) {
       return RANK[cap] < RANK[role] ? cap : role;
     },
     screenLimit: id => screenLimit(id),
+    // A spare carrying on from another screen (features/screens.js) takes on that screen's limit
+    // too, if it is stricter: a spare for a crew phone is a crew phone; a crew phone can't gain
+    // more by carrying on from the stage manager's iPad.
+    carryLimit(fromId, ws) {
+      if (!ws.screenId || fromId === ws.screenId) return;
+      const from = screenLimit(fromId), mine = screenLimit(ws.screenId);
+      if (RANK[from] >= RANK[mine]) return;
+      const cur = ctx.settings().server || {};
+      ctx.saveSettings({ server: { ...cur, screenLimits: { ...(cur.screenLimits || {}), [ws.screenId]: from } } });
+      reapply();
+    },
     viewerMay: t => viewerOk.add(t),
     adminOnly: t => adminOnly.add(t),
     atLeast: (ws, role) => RANK[ws.role || 'admin'] >= RANK[role],

@@ -353,6 +353,7 @@ function cueOutcome(cue, i, results) {
   for (const r of results) {
     const key = `cue-step:${r.device}`;
     if (CUE_OK.includes(r.outcome)) { clearAlert(key); continue; }
+    if (alerts.some(a => a.key === key)) continue; // already showing (and sent to the phone): one per device, not one per cue
     raiseAlert({ key, kind: 'cue', level: 'error', device: r.device, title: `Cue ${cue.number ?? i + 1} ${cue.label || ''}: ${r.name || r.device} did not take it`,
       detail: `${OUTCOME_WORDS[r.outcome] || r.outcome}${r.detail ? `: ${r.detail}` : ''}` });
   }
