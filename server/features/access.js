@@ -91,6 +91,15 @@ module.exports = function access(ctx) {
     return { screenLimits: map, newScreens };
   };
   adminOnly.add('screen-limit-set');
+  // Pre-show check: crew pages (phones, kiosk cue lights, front of house) that could still press GO.
+  ctx.checks.push(() => {
+    const crewPages = ['crew', 'foh', 'lobby'];
+    const open = (ctx.handlers['screens-list']?.() || []).filter(s => s.connected && crewPages.includes(s.view?.tab) && s.role !== 'viewer');
+    if (!open.length) return [];
+    return [{ group: 'Show', state: 'warn', label: 'Crew screens',
+      detail: `${open.map(s => s.name).slice(0, 4).join(', ')}${open.length > 4 ? ` and ${open.length - 4} more` : ''} can press GO and change things. Set them to "Crew & watch only" on System > Screens.` }];
+  });
+
   // Leaving kiosk mode on a crew screen (public/crew/common.js) needs the admin PIN, when there is one.
   ctx.handlers['kiosk-exit'] = m => {
     const p = pins();

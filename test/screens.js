@@ -54,12 +54,16 @@ function connect({ screen, pin, from = '127.0.0.2' } = {}) {
   await ipad.ask({ t: 'screen-hello', screen: 'sipad0001', name: 'Rocco iPad', view: { tab: 'sys' } });
   await phone.ask({ t: 'screen-hello', screen: 'sphone001', name: 'Fly floor', view: { tab: 'crew' } });
   assert.match((await ipad.ask({ t: 'screen-limit-set', screen: 'sipad0001', limit: 'viewer' })).error, /screen you are using/, 'cannot lock yourself out without a PIN');
+  const pre = await ipad.ask({ t: 'preshow-check' });
+  assert.match(pre.items.find(i => i.label === 'Crew screens')?.detail || '', /Fly floor can press GO/, 'the pre-show check spots a crew phone that can press GO');
   const set = await ipad.ask({ t: 'screen-limit-set', screen: 'sphone001', name: 'Fly floor', limit: 'viewer' });
   assert.equal(set.screenLimits.sphone001, 'viewer');
   await wait(300);
   assert.equal(phone.init.role, 'viewer', 'the phone is told at once');
   assert.ok(phone.init.screenLimited);
   assert.equal(ipad.screens.find(s => s.id === 'sphone001').limit, 'viewer', 'System > Screens shows the limit');
+  await phone.ask({ t: 'screen-hello', screen: 'sphone001', name: 'Fly floor', view: { tab: 'crew' } }); // the page says hello again after its new init
+  assert.ok(!(await ipad.ask({ t: 'preshow-check' })).items.some(i => i.label === 'Crew screens'), 'and is happy once it is limited');
   const before = ipad.show?.index ?? 0;
   phone.send({ t: 'show', action: 'go' }); await wait(300);
   assert.match(phone.errors.join(), /crew and watch only/, 'a limited phone cannot press GO');
