@@ -57,6 +57,14 @@ Crew roles, the checklist and the script are saved in the show file under `"crew
 Show → Edit cues. Notes, ticks and calls are kept across a restart. The 🌙 button on every screen switches
 that device to a dim, red-only night mode for backstage.
 
+**Kiosk screens** (a Chromebook, Android tablet or spare iPad that only ever shows one of these pages,
+e.g. a cue light on the fly floor): System → Stage manager and crew screens → *Kiosk…* gives a link
+and QR code, with the job fixed for a crew cue light (`/crew.html?kiosk=1&job=Fly%20floor`). Open it
+once on the device and it remembers. A kiosk screen goes full screen at the first tap, stays awake,
+hides the ways off the page (Change job, Full controls), reloads itself after 30 seconds without
+Show Control and warns when its battery is low. Press and hold the clock for 3 seconds to leave kiosk
+mode (it asks for the admin PIN, if there is one); `?kiosk=0` also turns it off.
+
 ## Easiest way to try it (Mac or Windows, nothing to install)
 
 1. Go to [Releases](https://github.com/roccomatusic-max/TheaterControl/releases) and download
@@ -188,6 +196,17 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 - **Who can do what** (System tab): an admin PIN (everything; the same PIN as on the Setup screen),
   an operator PIN (runs the show, edits cues) and a crew PIN (watch only). Optionally, crew can watch
   without a PIN. With no PINs, there is no sign-in. The PINs apply in practice and live.
+- **What each screen may do** (System > Screens): set any iPad or phone to *Run the show* or *Crew &
+  watch only*, and choose what *new screens* may do, e.g. "Crew & watch only" before the crew arrive,
+  so a phone that opens Show Control can't press GO or change the setup. It works without PINs too.
+  A limit applies on top of the PIN (an operator PIN on a crew-only phone is crew-only); the admin
+  PIN and the show computer itself always get everything, so nobody is locked out. Screens are
+  recognised by an id kept on the device: this stops accidents, it is not a password.
+- **Two GOs at once**: a GO from another screen within half a second of the last one (the SM and the
+  operator, an iPad and a Stream Deck) is ignored, and that screen is told. `"show": { "goLockout": 0.5 }`
+  in the show file changes the time; 0 turns it off.
+- **A cue step that didn't work** (equipment not connected, refused, no answer) shows on every screen
+  straight away, one alert per piece of equipment, until it takes a cue step again.
 - **Cue list history**: every saved cue list is kept (the newest 200) in `Show Control/Cue list history`.
   *Undo* puts back the one before the last save, and undoing again redoes. Any earlier version can
   be put back, with a summary of what changed.

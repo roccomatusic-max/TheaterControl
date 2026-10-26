@@ -17,13 +17,14 @@ class QLabDriver extends Driver {
     this.udp = dgram.createSocket('udp4');
     this.udp.on('message', m => this.onPacket(m));
     this.udp.on('error', e => this.log(e.message, 'warn'));
-    this.udp.bind(this.cfg.listenPort || 0, () => {
-      this.log(`UDP → ${host}:${port}`);
-      if (passcode) this.send('/connect', [String(passcode)]);
-      this.send('/updates', [1]);
-    });
+    // Signing in (passcode) and asking for updates is per QLab session: done again every 30 s, so
+    // QLab being restarted or the workspace reopened mid-show doesn't leave commands refused.
+    const hello = () => { if (passcode) this.send('/connect', [String(passcode)]); this.send('/updates', [1]); };
+    this.udp.bind(this.cfg.listenPort || 0, () => { this.log(`UDP → ${host}:${port}`); hello(); });
+    let ticks = 0;
     // QLab doesn't push playhead on every workspace, so poll it cheaply.
     this.poll = setInterval(() => {
+      if (++ticks % 30 === 0 || (this.status !== 'online' && ticks % 5 === 0)) hello();
       this.send('/cue/playhead/number');
       this.send('/cue/playhead/displayName');
       this.send('/runningCues/shallow');

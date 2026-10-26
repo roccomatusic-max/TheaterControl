@@ -176,6 +176,8 @@ async function runAction(a, source) {
     let r;
     try { r = await d.command(a.cmd, a.args || {}); if (!r || typeof r !== 'object') r = { outcome: 'sent' }; }
     catch (e) { r = { outcome: 'not_sent', detail: e.message }; }
+    // "Sent" to equipment that isn't answering is not a success: say so instead of a green tick.
+    if (r.outcome === 'sent' && ['offline', 'connecting'].includes(d.status)) r = { outcome: 'offline', detail: `${d.name} is not connected, so this may not have arrived` };
     // a projector in standby is already dark, so a refused shutter-close there is not a problem
     if (a.cmd === 'shutter' && a.args?.closed && r.outcome === 'busy' && ['standby', 'cooling'].includes(d.snapshot().state?.power)) r = { outcome: 'ok', detail: 'in standby, already dark' };
     if (a.cmd !== 'move' && a.cmd !== 'zoom') {
@@ -314,7 +316,19 @@ function runCueActions(i, actions, source, dept) {
   for (const a of actions) {
     setTimeout(() => runAction(a, `cue ${cue.number ?? i + 1}`)
       .catch(e => { log({ device: a.device, level: 'error', msg: e.message, t: Date.now() }); return [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }]; })
-      .then(results => events.emit('cue-results', { i, at, action: a, results })), (a.delay || 0) * 1000);
+      .then(results => { events.emit('cue-results', { i, at, action: a, results }); cueOutcome(cue, i, results); }), (a.delay || 0) * 1000);
+  }
+}
+// A step of a cue that didn't work is shown on every screen straight away (not only in the log),
+// one alert per piece of equipment; it goes once that equipment takes a cue step again.
+const CUE_OK = ['ok', 'accepted', 'sent'];
+const OUTCOME_WORDS = { offline: 'not connected', timeout: 'no answer', not_sent: 'not sent', rejected: 'refused', busy: 'busy, warming up', auth_failed: 'wrong password', fault: 'fault' };
+function cueOutcome(cue, i, results) {
+  for (const r of results) {
+    const key = `cue-step:${r.device}`;
+    if (CUE_OK.includes(r.outcome)) { clearAlert(key); continue; }
+    raiseAlert({ key, kind: 'cue', level: 'error', device: r.device, title: `Cue ${cue.number ?? i + 1} ${cue.label || ''}: ${r.name || r.device} did not take it`,
+      detail: `${OUTCOME_WORDS[r.outcome] || r.outcome}${r.detail ? `: ${r.detail}` : ''}` });
   }
 }
 function fireCue(i, source) {
@@ -332,7 +346,7 @@ function fireCue(i, source) {
 }
 // Seconds after a GO in which another GO is ignored (show.goLockout in the show file; 0 turns it off).
 const GO_LOCKOUT = Math.max(0, Number(cfg.show?.goLockout ?? 0.5)) * 1000;
-let lastGo = { at: 0, who: '', name: '' };
+let lastGo = { at: 0, by: '', name: '' };
 function timer(name, op) {
   const tm = show.timers[name]; if (!tm) return;
   if (op === 'start' && !tm.start) { tm.start = Date.now(); if (name === 'show' && recorder.auto) recorder.start('show timer'); }
@@ -609,11 +623,13 @@ function onConnection(ws, req) {
       }
       else if (m.t === 'show') {
         if (m.action === 'go') {
-          // Two GOs at once (the SM and the operator, a foot pedal bounce, a double tap on a slow
-          // network) would skip a cue: the second one within the lockout is ignored, and said so.
+          // Two people pressing GO at once (the SM and the operator, an iPad and a Stream Deck) would
+          // skip a cue: a GO from another screen within the lockout is ignored, and said so. (Each
+          // screen already ignores its own double taps and pedal bounces.)
           const since = Date.now() - lastGo.at;
-          if (since < GO_LOCKOUT) throw new Error(`Second GO ignored: ${lastGo.who === who ? 'pressed twice' : `${lastGo.name} pressed GO`} ${(since / 1000).toFixed(1)} s ago`);
-          lastGo = { at: Date.now(), who, name: ctx.screenName?.(who) || who };
+          const by = ws.screenId || who;
+          if (since < GO_LOCKOUT && lastGo.by !== by) throw new Error(`Second GO ignored: ${lastGo.name} pressed GO ${(since / 1000).toFixed(1)} s ago`);
+          lastGo = { at: Date.now(), by, name: ctx.screenById?.(ws.screenId) || ctx.screenName?.(who) || who };
           fireCue(show.index, who);
         }
         else if (m.action === 'fire') fireCue(Number(m.index), who);

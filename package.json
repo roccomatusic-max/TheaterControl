@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "sim": "node sim/run.js",
-    "test": "node test/smoke.js && node test/projection.js && node test/safety.js && node test/setup.js && node test/crew.js && node test/sound.js && node test/compat.js && node test/health.js && node test/lock.js && node test/failover.js && node test/showtools.js && node test/inputs.js && node test/lighting.js && node test/library.js && node test/updates.js && node test/video.js",
+    "test": "node test/smoke.js && node test/projection.js && node test/safety.js && node test/setup.js && node test/crew.js && node test/sound.js && node test/compat.js && node test/health.js && node test/lock.js && node test/failover.js && node test/showtools.js && node test/inputs.js && node test/lighting.js && node test/library.js && node test/updates.js && node test/video.js && node test/screens.js && node test/reliability.js",
     "package": "node scripts/package.js"
   },
   "license": "UNLICENSED",

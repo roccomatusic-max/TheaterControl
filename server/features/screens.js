@@ -28,6 +28,7 @@ module.exports = function screens(ctx) {
   };
   ctx.handlers['screens-list'] = () => pub();
   // The name of the screen at this address, for logs and reports ("Rocco's iPad" rather than an IP).
+  ctx.screenById = id => list.get(id)?.name;
   ctx.screenName = who => [...list.values()].find(s => s.connected && s.who === who)?.name;
   // This screen carries on from another one: it gets that screen's name and view, and the other one
   // is forgotten (if it comes back, it joins as itself again).
