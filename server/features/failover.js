@@ -54,10 +54,11 @@ module.exports = function failover(ctx) {
         // The main computer is in practice or training mode (pretend equipment): don't copy its
         // pretend show, and don't take over while it is running. Look again in a while.
         if (!m.failover) { resting = true; me.reason = `the main computer is in ${m.mode === 'training' ? 'training' : 'practice'} mode`; ws.close(); return; }
-        applyShow(m.show); if (m.lock !== undefined) ctx.events.emit('mirror-lock', m.lock);
+        applyShow(m.show); ctx.crew.mirror(m.crew); if (m.lock !== undefined) ctx.events.emit('mirror-lock', m.lock);
         ws.send(JSON.stringify({ t: 'mirror-hello', id: me.id }));
       }
       else if (m.t === 'show') applyShow(m.show);
+      else if (m.t === 'crew') ctx.crew.mirror(m.crew);
       else if (m.t === 'lock') ctx.events.emit('mirror-lock', m.lock);
       else if (m.t === 'mirror-file') applyFile(m.file);
       else if (m.t === 'failover-handback') takeOver('the backup computer handed the show back');

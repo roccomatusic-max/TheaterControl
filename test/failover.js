@@ -29,9 +29,10 @@ function connect(who) {
     ws.on('message', raw => {
       const m = JSON.parse(raw);
       if (m.t === 'auth-required') c.send({ t: 'auth', pin: '4321' });
-      if (m.t === 'init') { c.init = m; c.show = m.show; c.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); resolve(c); }
+      if (m.t === 'init') { c.init = m; c.show = m.show; c.crew = m.crew; c.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); resolve(c); }
       if (m.t === 'device') c.devices[m.device.id] = m.device;
       if (m.t === 'show') c.show = m.show;
+      if (m.t === 'crew') c.crew = m.crew;
       if (m.t === 'failover') c.events.push(m);
       if (m.t === 'error' && !pending[m.id]) c.errors.push(m.msg);
       if ((m.t === 'reply' || m.t === 'error' || m.t === 'saved') && pending[m.id]) pending[m.id](m.t === 'error' ? { error: m.msg } : m.data ?? {});
@@ -67,6 +68,9 @@ async function until(what, fn, ms = 10000) {
   main.send({ t: 'show', action: 'go' }); main.send({ t: 'show', action: 'go' });
   const cues = JSON.parse(JSON.stringify(main.init.show.cues)); cues[0].label = 'House to half (copied)';
   assert.ok(!(await main.ask({ t: 'save-cues', cues })).error);
+  assert.ok(!(await main.ask({ t: 'crew', op: 'call', text: 'Five minutes please', name: 'SM' })).error);
+  assert.ok(!(await main.ask({ t: 'crew', op: 'foh', status: 'open', name: 'FOH' })).error);
+  await until('backup has the crew screens', () => backup.crew?.calls.some(c => c.text === 'Five minutes please') && backup.crew.foh.status === 'open');
   await main.ask({ t: 'show-lock', on: true });
   await until('backup has the show position and cue edit', () => backup.show.index === 2 && backup.show.cues[0].label === 'House to half (copied)');
   await until('backup saved the show file', () => JSON.parse(fs.readFileSync(fileOf('backup'), 'utf8')).show.cues[0].label === 'House to half (copied)', 5000);
@@ -83,6 +87,7 @@ async function until(what, fn, ms = 10000) {
   backup = await connect('backup');
   assert.ok(backup.init.failover.active, 'backup is running the show');
   assert.equal(backup.show.index, 2, 'same cue position');
+  assert.ok(backup.crew.calls.some(c => c.text === 'Five minutes please') && backup.crew.foh.status === 'open', 'crew calls and the house status carried on');
   assert.ok(backup.init.alerts.some(a => a.key === 'failover' && /taken over/.test(a.title)), 'the takeover shows on the alert bar');
   await until('backup connected to the equipment', () => backup.devices.eos?.status === 'online' && backup.devices.tf5?.status === 'online');
   backup.send({ t: 'show', action: 'go' });

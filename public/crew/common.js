@@ -34,8 +34,16 @@ function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?screen=${encodeURIComponent(screenId)}`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500); };
-  ws.onmessage = e => handle(JSON.parse(e.data));
+  ws.onmessage = e => { lastHeard = Date.now(); handle(JSON.parse(e.data)); };
 }
+// The server sends something at least every 3 seconds: nothing for 9 means this connection is dead
+// (Wi-Fi dropped) even if the browser hasn't noticed yet, so show "Not connected" and start again.
+let lastHeard = Date.now();
+setInterval(() => {
+  if (ws?.readyState !== 1 || !C.ready || Date.now() - lastHeard < 9000) return;
+  const dead = ws; dead.onclose = dead.onmessage = null; try { dead.close(); } catch { /* already gone */ }
+  setConn(false); lastHeard = Date.now(); connect();
+}, 2000);
 const send = m => ws?.readyState === 1 ? (ws.send(JSON.stringify(m)), true) : (toast('Not connected'), false);
 // Crew requests always get an answer: { ok: true }, or the reason it didn't work (shown as a toast).
 function ask(op, data = {}) {

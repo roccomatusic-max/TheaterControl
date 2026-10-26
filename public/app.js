@@ -40,8 +40,16 @@ function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${wsHost()}/ws?screen=${encodeURIComponent(myScreenId() || '')}`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500); };
-  ws.onmessage = e => handle(JSON.parse(e.data));
+  ws.onmessage = e => { lastHeard = Date.now(); handle(JSON.parse(e.data)); };
 }
+// The server sends something at least every 3 seconds. Nothing for 9: this connection is dead even if
+// the browser hasn't noticed (Wi-Fi dropped), so say "Not connected" now and open a new one.
+let lastHeard = Date.now();
+setInterval(() => {
+  if (ws?.readyState !== 1 || !S.show || Date.now() - lastHeard < 9000) return;
+  const dead = ws; dead.onclose = dead.onmessage = null; try { dead.close(); } catch { /* already gone */ }
+  setConn(false); lastHeard = Date.now(); connect();
+}, 2000);
 const send = m => ws?.readyState === 1 ? ws.send(JSON.stringify(m)) : toast('Not connected');
 // Every command gets a per-device result back; anything that didn't work is shown, never swallowed.
 let cmdSeq = 0; const pending = {};

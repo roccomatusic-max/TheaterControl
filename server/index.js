@@ -578,6 +578,7 @@ function removePhone(ws, slot) {
 }
 
 function onConnection(ws, req) {
+  ws.on?.('pong', () => (ws.alive = true));
   const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
   // Which iPad or phone this is (kept on the device), so the System tab can limit what it may do.
   const sid = /[?&]screen=([A-Za-z0-9_-]{4,40})/.exec(req.url || '')?.[1];
@@ -586,6 +587,7 @@ function onConnection(ws, req) {
   ws.signedInAs = ws.authed ? 'admin' : null;
   ws.role = ws.authed ? ctx.access.limit(ws, 'admin') : null;
   const hello = () => {
+    if (ws.token) tokens.delete(ws.token); // sent again (System > Screens changed this screen): a fresh one
     const token = crypto.randomBytes(16).toString('hex');
     // Recordings and notes need a full sign-in; screens and crew phones may only watch video.
     tokens.set(token, { readonly: ws.readonly || ws.role === 'viewer' }); ws.token = token;
@@ -695,6 +697,19 @@ function onConnection(ws, req) {
   });
 }
 wss.on('connection', onConnection);
+
+// Heartbeat both ways. An iPad that walked out of Wi-Fi range leaves a connection that looks open for
+// minutes: the server drops it when it stops answering pings, and every screen gets a small message
+// every 3 seconds, so a screen that hears nothing for a while knows it is cut off (it shows "Not
+// connected" and connects again) instead of taking GO presses that go nowhere.
+setInterval(() => {
+  const beat = JSON.stringify({ t: 'hb', now: Date.now() });
+  for (const w of sockets) for (const c of w.clients) {
+    if (c.alive === false) { c.terminate(); continue; }
+    c.alive = false; c.ping();
+    if (c.authed && c.readyState === 1) c.send(beat);
+  }
+}, 3000).unref();
 
 // Phones only let a page use their camera over HTTPS, so the same app is also served over
 // HTTPS with a certificate made on this computer (the phone asks once to trust it).

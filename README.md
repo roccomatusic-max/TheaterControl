@@ -201,7 +201,8 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   so a phone that opens Show Control can't press GO or change the setup. It works without PINs too.
   A limit applies on top of the PIN (an operator PIN on a crew-only phone is crew-only); the admin
   PIN and the show computer itself always get everything, so nobody is locked out. Screens are
-  recognised by an id kept on the device: this stops accidents, it is not a password.
+  recognised by an id kept on the device: this stops accidents, it is not a password. With a backup
+  computer, set the same limits on it too (each computer keeps its own).
 - **Two GOs at once**: a GO from another screen within half a second of the last one (the SM and the
   operator, an iPad and a Stream Deck) is ignored, and that screen is told. `"show": { "goLockout": 0.5 }`
   in the show file changes the time; 0 turns it off.
@@ -231,7 +232,7 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
   - When the main computer comes back, it waits on standby. Tap *Hand back to the main computer* on the
     backup when it suits you (for example in the interval); the backup then restarts on standby.
   - *Take over now* on the standby computer forces a switch. Only use it if the other one has really stopped.
-  - Not copied yet: crew screen state (calls, checklist ticks).
+  - Crew screens carry on too: calls, checklist ticks, the house status, countdown and standby answers are copied.
 - **Spare screens**: every iPad, phone and computer has a name (System > Screens, *Rename*). If one
   breaks or goes flat, open Show Control on a spare: it offers to carry on from the screen that dropped
   off, with the same name, tab, camera and projector group. *Carry on here* on the Screens card does
