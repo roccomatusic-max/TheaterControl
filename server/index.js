@@ -598,6 +598,7 @@ function removePhone(ws, slot) {
   broadcast({ t: 'device-removed', id: slot });
 }
 
+const authFails = new Map(); // address → { n: wrong PINs in a row, until: when it may try again }
 function onConnection(ws, req) {
   ws.on?.('pong', () => (ws.alive = true));
   const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
@@ -627,7 +628,18 @@ function onConnection(ws, req) {
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.t === 'auth') {
+      // Wrong PINs: after 5 in a row from one address, that address waits (15 s, then longer), so a
+      // PIN can't be found by trying them all.
+      const f = authFails.get(who);
+      if (f?.until > Date.now()) return ws.send(JSON.stringify({ t: 'auth-failed', wait: Math.ceil((f.until - Date.now()) / 1000) }));
       const key = viewKey(), role = m.key == null ? ctx.access.roleFor(m.pin) : null;
+      const ok = (m.key != null && key && String(m.key) === key) || !!role;
+      if (ok) authFails.delete(who);
+      else {
+        const n = (f?.n || 0) + 1;
+        authFails.set(who, { n, until: n >= 5 ? Date.now() + Math.min(300, 15 * 2 ** (n - 5)) * 1000 : 0 });
+        if (n === 5) log({ device: 'core', level: 'warn', msg: `${who}: 5 wrong PINs in a row, made to wait before trying again`, t: Date.now() });
+      }
       if (m.key != null && key && String(m.key) === key) { ws.authed = true; ws.readonly = true; ws.role = 'viewer'; hello(); log({ device: 'core', msg: `screen ${who} connected`, t: Date.now() }); }
       else if (role) { ws.authed = true; ws.signedInAs = role; ws.role = ctx.access.limit(ws, role); hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
       else ws.send(JSON.stringify({ t: 'auth-failed' }));

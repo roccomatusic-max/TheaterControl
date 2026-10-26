@@ -101,9 +101,15 @@ module.exports = function access(ctx) {
   });
 
   // Leaving kiosk mode on a crew screen (public/crew/common.js) needs the admin PIN, when there is one.
-  ctx.handlers['kiosk-exit'] = m => {
-    const p = pins();
-    if (p.admin && String(m.pin ?? '') !== p.admin) throw new Error('Wrong PIN: this screen stays in kiosk mode.');
+  const kioskFails = new Map(); // address → wrong PINs in a row (3 allowed, then a minute's wait)
+  ctx.handlers['kiosk-exit'] = (m, ws) => {
+    const p = pins(), f = kioskFails.get(ws.who) || { n: 0, until: 0 };
+    if (f.until > Date.now()) throw new Error('Too many wrong PINs: try again in a minute.');
+    if (p.admin && String(m.pin ?? '') !== p.admin) {
+      kioskFails.set(ws.who, { n: f.n + 1, until: f.n + 1 >= 3 ? Date.now() + 60e3 : 0 });
+      throw new Error('Wrong PIN: this screen stays in kiosk mode.');
+    }
+    kioskFails.delete(ws.who);
     return { ok: true };
   };
   viewerOk.add('kiosk-exit');

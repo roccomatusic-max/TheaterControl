@@ -67,7 +67,7 @@ function setConn(ok) {
 }
 function handle(m) {
   if (m.t === 'auth-required') { pinEl.hidden = false; const saved = localStorage.getItem('pin'); if (saved) send({ t: 'auth', pin: saved }); else $('input', pinEl).focus(); }
-  else if (m.t === 'auth-failed') { $('.err', pinEl).textContent = 'Wrong PIN'; localStorage.removeItem('pin'); pinEl.hidden = false; }
+  else if (m.t === 'auth-failed') { $('.err', pinEl).textContent = m.wait ? `Too many wrong PINs: try again in ${m.wait} s` : 'Wrong PIN'; if (!m.wait) localStorage.removeItem('pin'); pinEl.hidden = false; }
   else if (m.t === 'init') {
     pinEl.hidden = true;
     Object.assign(C, { show: m.show, crew: m.crew, script: m.script || { text: '', marks: {} }, groups: m.groups || [], mode: m.mode, skew: m.show.now - Date.now(), ready: true });

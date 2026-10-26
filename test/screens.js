@@ -136,6 +136,15 @@ function connect({ screen, pin, from = '127.0.0.2' } = {}) {
   fs.writeFileSync(file, JSON.stringify(withPins));
   await start();
   assert.equal((await connect({ screen: 'sphone001', pin: '1111' })).init.role, 'admin', 'admin PIN beats the limit');
+  // trying PINs: after 5 wrong ones in a row that address has to wait, even for the right one
+  const tryPin = pin => new Promise(res => {
+    const ws = new WebSocket(`ws://127.0.0.1:${env.PORT}/ws`, { localAddress: '127.0.0.3' });
+    ws.on('message', raw => { const m = JSON.parse(raw); if (m.t === 'auth-required') ws.send(JSON.stringify({ t: 'auth', pin })); else if (m.t === 'auth-failed' || m.t === 'init') { ws.close(); res(m); } });
+  });
+  for (const p of ['0000', '0001', '0002', '0003', '0004']) assert.equal((await tryPin(p)).t, 'auth-failed');
+  const locked = await tryPin('1111');
+  assert.ok(locked.t === 'auth-failed' && locked.wait > 0, 'made to wait after 5 wrong PINs');
+  assert.equal((await connect({ screen: 'sother001', pin: '1111' })).init.role, 'admin', 'other addresses are not affected');
   const opPhone = await connect({ screen: 'sphone001', pin: '2222' });
   assert.equal(opPhone.init.role, 'viewer', 'operator PIN on a crew-only phone is crew-only');
   assert.match((await opPhone.ask({ t: 'kiosk-exit', pin: '' })).error, /Wrong PIN/);

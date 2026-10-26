@@ -77,7 +77,7 @@ function handle(m) {
   (msgHandlers[m.t] || []).forEach(fn => fn(m)); // first, so other files' state is ready when the screen is drawn
   extraHandlers.forEach(f => f(m));
   if (m.t === 'auth-required') { $('#pin').hidden = false; $('#pinInput').focus(); const saved = localStorage.getItem('pin'); if (saved) send({ t: 'auth', pin: saved }); }
-  else if (m.t === 'auth-failed') { $('#pinErr').textContent = 'Wrong PIN'; localStorage.removeItem('pin'); $('#pin').hidden = false; }
+  else if (m.t === 'auth-failed') { $('#pinErr').textContent = m.wait ? `Too many wrong PINs: try again in ${m.wait} s` : 'Wrong PIN'; if (!m.wait) localStorage.removeItem('pin'); $('#pin').hidden = false; }
   else if (m.t === 'init') {
     $('#pin').hidden = true;
     S.devices = Object.fromEntries(m.devices.map(d => [d.id, d])); S.show = m.show; S.log = m.log; S.ui = m.ui; S.groups = m.groups || []; S.crew = m.crew;
