@@ -6,6 +6,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# a newer push to the same pull request replaces a run still going
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
