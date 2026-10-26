@@ -5,3 +5,10 @@ dist/
 config/Cue list history/
 config/Backups/
 config/Show reports/
+runtime/
+config/.go2rtc.yaml
+config/.https/
+config/Recordings/
+config/Notes/
+config/.*.state.json
+config/.go2rtc.pid

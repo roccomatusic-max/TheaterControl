@@ -118,6 +118,15 @@ class EosDriver extends Driver {
       case 'sub': return this.send(`/eos/sub/${a.sub}`, [{ type: 'f', value: Number(a.level) }]); // level 0..1
       case 'chan': return this.send('/eos/newcmd', [`Chan ${a.chan} At ${a.level}#`]);
       case 'cmdline': return this.send('/eos/newcmd', [String(a.text)]);
+      // Focus helper: nudge the selected light with the encoder wheels (pan, tilt, zoom, edge, iris…).
+      case 'wheel': {
+        if (!/^[a-z_]+$/.test(String(a.param))) throw new Error('eos: unknown wheel');
+        return this.send(`/eos/wheel/${a.fine ? 'fine' : 'coarse'}/${a.param}`, [{ type: 'f', value: Number(a.ticks) || 0 }]);
+      }
+      case 'key': {
+        if (!['next', 'last'].includes(a.key)) throw new Error('eos: unknown key');
+        return this.send(`/eos/key/${a.key}`);
+      }
       default: return super.command(cmd);
     }
   }

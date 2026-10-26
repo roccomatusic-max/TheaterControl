@@ -59,7 +59,9 @@ function eosSim(port) {
 
 // ---------- QLab (OSC over UDP, JSON replies) ----------
 function qlabSim(port) {
-  const cues = Array.from({ length: 30 }, (_, i) => ({ number: String(i + 1), name: ['House music', 'Preshow announce', 'Overture', 'Thunder', 'Door slam', 'Underscore', 'Bows'][i % 7] }));
+  const cues = Array.from({ length: 30 }, (_, i) => ({ number: String(i + 1), name: ['House music', 'Preshow announce', 'Overture', 'Thunder', 'Door slam', 'Underscore', 'Bows'][i % 7],
+    uniqueID: `Q${i + 1}`, type: i % 5 === 3 ? 'Video' : i % 7 === 6 ? 'Fade' : 'Audio' }));
+  cues[13].broken = '/Users/sound/Show/Video/Storm.mov'; // one video file "missing", to show the content check
   let ph = 0; const running = [];
   const s = dgram.createSocket('udp4');
   s.on('message', (m, r) => {
@@ -75,6 +77,11 @@ function qlabSim(port) {
     else if (address === '/cue/playhead/number') reply(cues[ph].number);
     else if (address === '/cue/playhead/displayName') reply(cues[ph].name);
     else if (address === '/runningCues/shallow') reply(running.map(name => ({ name })));
+    else if (address === '/cueLists') reply([{ uniqueID: 'L1', number: '', name: 'Main Cue List', type: 'Cue List', cues: cues.map(({ broken, ...c }) => c) }]);
+    else if (/^\/cue_id\/[^/]+\/valuesForKeys$/.test(address)) {
+      const c = cues.find(x => x.uniqueID === address.split('/')[2]);
+      if (c) reply({ isBroken: !!c.broken, fileTarget: c.type === 'Fade' ? undefined : c.broken || `/Users/sound/Show/${c.type}/${c.name}.${c.type === 'Video' ? 'mov' : 'wav'}` });
+    }
   });
   s.bind(port, () => log('qlab', `OSC/UDP on ${port}`));
 }

@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const http = require('http');
+const https = require('https');
 const os = require('os');
+const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
@@ -15,6 +17,11 @@ const discover = require('./discover');
 const { MicPlan, validateMics } = require('./mics');
 const FeedbackWatch = require('./feedback');
 const createCrew = require('./crew');
+const { Video, lanIPs } = require('./video');
+const Recorder = require('./recorder');
+const Notes = require('./notes');
+const rtsp = require('./lib/rtsp');
+const selfsigned = require('./lib/selfsigned');
 
 let cfgPath = path.resolve(process.argv[2] || process.env.SHOW_CONFIG || path.join(__dirname, '../config/show.json'));
 // Set by the double-click launcher: practice (simulated gear) or live (the real show file), and
@@ -44,6 +51,8 @@ if (MODE === 'live' || MODE === 'direct') {
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 const PORT = Number(process.env.PORT || cfg.server?.port || 8080);
 const PIN = process.env.SHOW_PIN || cfg.server?.pin || '';
+// Recordings, notes and the video relay's settings live with the real show file (~/Show Control/ from the launcher), also while training.
+const DATA_DIR = HOME_DIR;
 
 // Practice mode keeps a copy of the practice show in the user's folder. Equipment added to the
 // practice gear in a later version (e.g. the radio mic receivers) is added to that copy here.
@@ -56,6 +65,7 @@ if (MODE === 'practice' && process.env.SHOW_SIM_CONFIG) {
 }
 
 // ---------- devices ----------
+const PTZ_TYPES = ['ptz', 'panasonic-cam']; // cameras that move (cue shots, emergency STOP)
 const logRing = [];
 const devices = new Map();
 function log(entry) {
@@ -115,6 +125,20 @@ function onMeters(d) {
   }
 }
 
+// ---------- video: live camera view, recording, snapshots ----------
+const video = new Video({ dir: DATA_DIR, log: (level, msg) => log({ device: 'video', level, msg, t: Date.now() }), apiPort: cfg.video?.apiPort, webrtcPort: cfg.video?.webrtcPort, rtspPort: cfg.video?.rtspPort });
+video.configure([...devices.values()].filter(d => d.cfg.video).map(d => ({ id: d.id, url: d.cfg.video })));
+const HTTPS_PORT = process.env.SHOW_HTTPS === '0' ? 0 : Number(cfg.server?.httpsPort || PORT + 363);
+let httpsUp = false;
+const videoInfo = () => ({ status: video.status, httpsPort: httpsUp ? HTTPS_PORT : null });
+video.on('status', () => broadcast({ t: 'video', video: videoInfo() }));
+// Cameras whose video the relay carries (real cameras with a video address, and connected phones).
+const liveCams = () => [...devices.values()].filter(d => d.state.stream?.type === 'live' && video.has(d.state.stream.src)).map(d => ({ id: d.state.stream.src, name: d.name }));
+const recorder = new Recorder({ dir: path.join(DATA_DIR, 'Recordings'), log: (level, msg) => log({ device: 'video', level, msg, t: Date.now() }),
+  mp4Url: id => video.mp4Url(id), cameras: liveCams, showName: () => show.name });
+recorder.on('changed', () => broadcast({ t: 'rec', rec: recorder.state() }));
+const notes = new Notes({ dir: path.join(DATA_DIR, 'Notes') });
+
 // Coalesce state pushes (TF sync and VISCA polls can be chatty) to ≤ 20/s per device.
 const dirty = new Set();
 let flushTimer = null;
@@ -170,8 +194,11 @@ const show = {
   index: 0,          // standby (next) cue
   lastFired: null,
   timers: { show: { start: null, acc: 0 }, act: { start: null, acc: 0 }, label: cfg.show?.timerLabel || 'Act 1' },
+  camFollow: true,   // false: cue steps that move cameras are skipped (someone is driving them by hand)
+  blackout: null,    // { at, by, open: [projector ids whose shutters were open] } while projectors are blacked out
 };
-const showSnapshot = () => ({ name: show.name, cues: show.cues, index: show.index, lastFired: show.lastFired, timers: show.timers, now: Date.now(), emergency: show.emergency || null });
+const showSnapshot = () => ({ name: show.name, cues: show.cues, index: show.index, lastFired: show.lastFired, timers: show.timers, now: Date.now(), emergency: show.emergency || null,
+  camFollow: show.camFollow, blackout: show.blackout });
 
 // Atomic write: a power cut mid-write never leaves a half-written file.
 function writeJson(file, data) {
@@ -187,6 +214,8 @@ function loadState() {
     show.index = Math.max(0, Math.min(show.cues.length, st.index ?? 0));
     show.lastFired = st.lastFired ?? null;
     for (const k of ['show', 'act']) if (st.timers?.[k]) show.timers[k] = st.timers[k];
+    if (st.camFollow === false) show.camFollow = false;
+    recorder.auto = !!st.recordAuto;
     console.log(`Resumed at cue position ${show.index + 1} (saved ${new Date(st.savedAt).toLocaleString()})`);
   } catch { /* first run */ }
 }
@@ -195,7 +224,7 @@ function saveState() {
   if (!STATE_PATH || stateTimer) return;
   stateTimer = setTimeout(() => {
     stateTimer = null;
-    try { writeJson(STATE_PATH, { index: show.index, lastFired: show.lastFired, timers: show.timers, savedAt: Date.now() }); }
+    try { writeJson(STATE_PATH, { index: show.index, lastFired: show.lastFired, timers: show.timers, camFollow: show.camFollow, recordAuto: recorder.auto, savedAt: Date.now() }); }
     catch (e) { log({ device: 'core', level: 'warn', msg: `could not save show position: ${e.message}`, t: Date.now() }); }
   }, 200);
 }
@@ -262,12 +291,12 @@ async function emergencyStop(who) {
   const actions = [
     ...[...devices.values()].filter(d => d.type === 'qlab').map(d => ({ device: d.id, cmd: 'panic' })),
     ...(projectors().length ? [{ device: 'group:all', cmd: 'shutter', args: { closed: true } }] : []),
-    ...[...devices.values()].filter(d => d.type === 'ptz' || d.type === 'panasonic-cam').flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
+    ...[...devices.values()].filter(d => PTZ_TYPES.includes(d.type)).flatMap(d => [{ device: d.id, cmd: 'move', args: { pan: 0, tilt: 0 } }, { device: d.id, cmd: 'zoom', args: { speed: 0 } }]),
     ...(cfg.safety?.emergency || []),
   ];
   log({ device: 'show', level: 'error', msg: `EMERGENCY STOP by ${who}`, t: Date.now() });
   const results = (await Promise.all(actions.map(a => runAction(a, `EMERGENCY ${who}`).catch(e => [{ device: a.device, name: a.device, outcome: 'not_sent', detail: e.message }])))).flat()
-    .filter(r => !(['sent', 'ok'].includes(r.outcome) && ['ptz', 'panasonic-cam'].includes(devices.get(r.device)?.type)))
+    .filter(r => !(['sent', 'ok'].includes(r.outcome) && PTZ_TYPES.includes(devices.get(r.device)?.type)))
     // a projector in standby is already dark, so a refused shutter-close there is not a problem
     .map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
   show.emergency = { at: Date.now(), by: who, results };
@@ -292,17 +321,59 @@ function fireCue(i, source) {
   show.lastFired = i;
   show.index = Math.min(i + 1, show.cues.length);
   log({ device: 'show', level: 'go', msg: `GO ${cue.number ?? i + 1} ${cue.label || ''} (${source})`, t: Date.now() });
-  runCueActions(i, (cue.actions || []).filter(a => !ctx.heldBack(a)), source);
+  recorder.mark('cue', `${cue.number ?? i + 1} ${cue.label || ''}`.trim(), { index: i });
+  // Cameras held (someone is driving them) skip the cue's camera moves; a second operator's department is held back too.
+  runCueActions(i, (cue.actions || []).filter(a => !ctx.heldBack(a) && !(show.camFollow === false && PTZ_TYPES.includes(devices.get(a.device)?.type))), source);
   broadcast({ t: 'show', show: showSnapshot() });
   saveState();
   crew.fired(i);
 }
 function timer(name, op) {
   const tm = show.timers[name]; if (!tm) return;
-  if (op === 'start' && !tm.start) tm.start = Date.now();
-  if (op === 'stop' && tm.start) { tm.acc += Date.now() - tm.start; tm.start = null; }
+  if (op === 'start' && !tm.start) { tm.start = Date.now(); if (name === 'show' && recorder.auto) recorder.start('show timer'); }
+  if (op === 'stop' && tm.start) { tm.acc += Date.now() - tm.start; tm.start = null; if (name === 'show' && recorder.auto) recorder.stop('show timer'); }
   if (op === 'reset') { tm.acc = 0; tm.start = tm.start ? Date.now() : null; }
   saveState();
+}
+
+// Black out: close every projector shutter at once, remembering which were open so Restore
+// opens just those again.
+async function blackout(on, who) {
+  let results;
+  if (on) {
+    if (!show.blackout) show.blackout = { at: Date.now(), by: who, open: projectors().filter(d => d.state.shutter === 'open').map(d => d.id) };
+    results = await runAction({ device: 'group:all', cmd: 'shutter', args: { closed: true } }, `blackout by ${who}`);
+  } else {
+    const ids = (show.blackout?.open ?? projectors().map(d => d.id)).filter(id => devices.has(id));
+    results = (await Promise.all(ids.map(id => runAction({ device: id, cmd: 'shutter', args: { closed: false } }, `restore by ${who}`)))).flat();
+    show.blackout = null;
+  }
+  broadcast({ t: 'show', show: showSnapshot() });
+  // a projector in standby is already dark (and stays dark), so its refusal is not a problem
+  return results.map(r => r.outcome === 'busy' && ['standby', 'cooling'].includes(devices.get(r.device)?.snapshot().state?.power) ? { ...r, outcome: 'ok', detail: 'in standby, already dark' } : r);
+}
+
+// Content check before house open: QLab's media files, projectors on and ready, cameras with video.
+async function contentCheck() {
+  const sections = [];
+  for (const d of devices.values()) {
+    if (d.type !== 'qlab') continue;
+    if (d.status !== 'online') { sections.push({ title: d.name, items: [{ ok: false, text: 'QLab is not connected, so its media files could not be checked.' }] }); continue; }
+    try {
+      const r = await d.contentCheck();
+      sections.push({ title: `${d.name}: media files`, items: r.broken.length
+        ? r.broken.map(c => ({ ok: false, text: `Cue ${c.number || '(no number)'} "${c.name}" (${c.type}): ${c.fileTarget ? `file missing: ${c.fileTarget}` : 'no file or broken'}` }))
+        : [{ ok: true, text: `All ${r.media} audio and video cues have their files (${r.total} cues checked).` }] });
+    } catch (e) { sections.push({ title: d.name, items: [{ ok: false, text: `Could not read the cue list: ${e.message}` }] }); }
+  }
+  const ps = projectors();
+  if (ps.length) sections.push({ title: 'Projectors', items: ps.map(p => {
+    const s = p.state, on = s.power === 'on';
+    return { ok: p.status === 'online' && on, text: `${p.name}: ${p.status !== 'online' ? 'not connected' : on ? `on${s.input ? `, input ${s.inputs?.find(i => i.code === s.input)?.label || s.input}` : ''}, shutter ${s.shutter || 'unknown'}` : `power ${s.power || 'unknown'}`}` };
+  }) });
+  const cams = [...devices.values()].filter(d => [...PTZ_TYPES, 'camera'].includes(d.type));
+  if (cams.length) sections.push({ title: 'Cameras', items: cams.map(c => ({ ok: c.status === 'online' && !!c.state.stream, text: `${c.name}: ${c.status === 'online' ? 'connected' : 'not connected'}${c.state.stream ? '' : ', no video address'}` })) });
+  return { at: Date.now(), sections };
 }
 
 // ---------- Setup screen: real equipment, practice/live ----------
@@ -377,7 +448,7 @@ const ctx = {
   guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
   // Replaced by features/access.js (PINs per role); this is the single-PIN behaviour without it.
   access: { required: () => !!PIN, hint: () => ({}), roleFor: pin => (!PIN || String(pin) === String(PIN) ? 'admin' : null) },
-  clients: () => [...wss.clients].filter(c => c.authed && c.readyState === 1 && !c.mirror),
+  clients: () => [...sockets].flatMap(w => [...w.clients]).filter(c => c.authed && c.readyState === 1 && !c.mirror),
   // Equipment connections open once the server is listening, unless a feature holds them (the
   // backup computer on standby). Each device is started at most once per run.
   holdDevices: false,
@@ -432,38 +503,95 @@ ol{color:#c9ced6;padding-left:20px}a.btn{display:inline-block;margin-top:20px;ba
 <a class="btn" href="/">Open the controls on this computer</a>
 </main></body></html>`);
 });
+// Who may load video, recordings and notes over plain HTTP: a browser that signed in on the
+// WebSocket gets a token cookie. Screens (TV, phone camera) sign in with a view-only key.
+const tokens = new Map(); // token → { readonly }
+// The key follows the admin PIN, which can be changed on the System tab while running.
+const viewKey = () => { const pin = String(process.env.SHOW_PIN || ctx.settings().server?.pin || ''); return pin ? crypto.createHash('sha256').update(`show-control-view:${pin}`).digest('hex').slice(0, 16) : ''; };
+const cookie = req => (/(?:^|;\s*)sc=([a-f0-9]+)/.exec(req.headers.cookie || '') || [])[1];
+const allowed = full => (req, res, next) => {
+  if (!ctx.access.required()) return next();
+  const t = tokens.get(cookie(req));
+  if (t && (!full || !t.readonly)) return next();
+  res.status(401).type('text').send('Sign in to Show Control first');
+};
+app.use('/video', allowed(false), (req, res) => video.proxy(req, res));
+app.get('/recordings/:folder/:file', allowed(true), (req, res) => {
+  const { folder, file } = req.params;
+  if (/[\\/]|^\./.test(folder) || !/^[^\\/]+\.(mp4|json)$/.test(file)) return res.status(404).end();
+  res.sendFile(path.join(folder, file), { root: recorder.dir, dotfiles: 'deny' }, e => e && !res.headersSent && res.status(404).end());
+});
+app.get('/notes/export.html', allowed(true), (_, res) => res.type('html').send(notes.exportHtml(show.name)));
+app.get('/notes/img/:name', allowed(true), (req, res) => { const p = notes.imagePath(req.params.name); p ? res.sendFile(p) : res.status(404).end(); });
+// QR codes for the screen and phone links on the System tab.
+app.get('/api/qr', async (req, res) => res.type('image/svg+xml').send(await QRCode.toString(String(req.query.text || '').slice(0, 500), { type: 'svg', margin: 1, color: { dark: '#000', light: '#fff' } })));
+app.get(['/tv', '/phone'], (req, res) => res.sendFile(path.join(__dirname, '../public', `${req.path.slice(1)}.html`)));
 app.use(express.static(path.join(__dirname, '../public'), { maxAge: 0 }));
 app.get('/api/health', (_, res) => res.json({ ok: true, app: 'show-control', version: require('../package.json').version, show: show.name, addresses: lanAddresses(), devices: [...devices.values()].map(d => ({ id: d.id, status: d.status })) }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+const sockets = new Set([wss]); // plus the HTTPS one, for phone cameras
 // A stand-in screen (features/remote.js: button boxes, OSC, MIDI, timecode) is handled exactly like a real one.
 ctx.attachScreen = (ws, label) => wss.emit('connection', ws, { socket: { remoteAddress: label } });
 function broadcast(msg) {
   const s = JSON.stringify(msg);
-  for (const c of wss.clients) if (c.authed && c.readyState === 1) c.send(s);
+  for (const w of sockets) for (const c of w.clients) if (c.authed && c.readyState === 1) c.send(s);
 }
 
-wss.on('connection', (ws, req) => {
+// A phone sending its camera shows up as a camera while it is connected.
+function addPhone(ws, name, who) {
+  const slot = video.claimPhone(name);
+  if (!slot) throw new Error('Four phones are already sending video. Stop one first.');
+  const label = `Phone · ${String(name || who).trim().slice(0, 30) || who}`;
+  const d = new drivers.camera({ id: slot, type: 'camera', name: label, phone: true, stream: { type: 'live', src: slot } });
+  d.on('log', log); d.on('changed', () => queueDevice(d));
+  devices.set(slot, d); d.start();
+  ws.phones.add(slot);
+  broadcast({ t: 'device', device: d.snapshot() });
+  return slot;
+}
+function removePhone(ws, slot) {
+  const d = devices.get(slot);
+  if (!d?.cfg.phone || !ws.phones.has(slot)) return;
+  d.stop(); devices.delete(slot); video.releasePhone(slot); ws.phones.delete(slot);
+  log({ device: slot, msg: `${d.name} stopped sending video`, t: Date.now() });
+  broadcast({ t: 'device-removed', id: slot });
+}
+
+function onConnection(ws, req) {
   const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
-  ws.authed = !ctx.access.required();
+  ws.authed = !ctx.access.required(); ws.readonly = false; ws.phones = new Set();
   ws.role = ws.authed ? 'admin' : null;
-  const hello = () => ws.send(JSON.stringify(Object.assign({
-    t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: logRing.slice(-100),
-    ui: cfg.ui || {}, groups: groups(), mode: MODE, alerts, crew: crew.snapshot(), script: crew.script(),
-    firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
-  }, ...ctx.initExtras.map(f => f(ws)))));
+  const hello = () => {
+    const token = crypto.randomBytes(16).toString('hex');
+    // Recordings and notes need a full sign-in; screens and crew phones may only watch video.
+    tokens.set(token, { readonly: ws.readonly || ws.role === 'viewer' }); ws.token = token;
+    ws.send(JSON.stringify(Object.assign({
+      t: 'init', devices: [...devices.values()].map(d => d.snapshot()), show: showSnapshot(), log: ws.readonly ? [] : logRing.slice(-100),
+      ui: cfg.ui || {}, groups: groups(), mode: MODE, token, readonly: ws.readonly, viewKey: ws.readonly || ws.role === 'viewer' ? undefined : viewKey(),
+      video: videoInfo(), rec: recorder.state(), alerts, crew: crew.snapshot(), script: crew.script(),
+      firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
+    }, ...(ws.readonly ? [] : ctx.initExtras.map(f => f(ws))))));
+  };
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required', ...ctx.access.hint() }));
+  ws.on('close', () => { tokens.delete(ws.token); for (const slot of [...ws.phones]) removePhone(ws, slot); });
+  const reply = (m, data) => ws.send(JSON.stringify({ t: 'reply', id: m.id, data }));
 
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.t === 'auth') {
-      const role = ctx.access.roleFor(m.pin);
-      if (role) { ws.authed = true; ws.role = role; hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
+      const key = viewKey(), role = m.key == null ? ctx.access.roleFor(m.pin) : null;
+      if (m.key != null && key && String(m.key) === key) { ws.authed = true; ws.readonly = true; ws.role = 'viewer'; hello(); log({ device: 'core', msg: `screen ${who} connected`, t: Date.now() }); }
+      else if (role) { ws.authed = true; ws.role = role; hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
       else ws.send(JSON.stringify({ t: 'auth-failed' }));
       return;
     }
     if (!ws.authed) return;
     try {
+      // Screens and phone cameras can watch, and a phone can send its camera, but nothing else.
+      if (m.t === 'phone-start') return reply(m, { slot: addPhone(ws, m.name, who) });
+      if (m.t === 'phone-stop') return removePhone(ws, m.slot);
+      if (ws.readonly) return;
       for (const guard of ctx.guards) guard(m, ws);
       if (m.t === 'cmd') {
         const results = await runAction(m, who);
@@ -501,25 +629,80 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ t: 'saved', id: m.id }));
         broadcast({ t: 'show', show: showSnapshot() });
       }
+      else if (m.t === 'cam-follow') { show.camFollow = !!m.on; log({ device: 'show', level: 'cmd', msg: `cameras ${m.on ? 'follow cues again' : 'held: cue camera moves are skipped'} (${who})`, t: Date.now() }); saveState(); broadcast({ t: 'show', show: showSnapshot() }); }
+      else if (m.t === 'blackout') reply(m, await blackout(!!m.on, who));
+      else if (m.t === 'content-check') reply(m, await contentCheck());
+      else if (m.t === 'find-video') reply(m, m.url ? await rtsp.probe(m.url).catch(e => ({ ok: false, detail: setup.plain(e) })) : await rtsp.find(String(m.host || ''), { user: m.user, pass: m.pass }));
+      else if (m.t === 'rec') {
+        if (m.action === 'start') reply(m, recorder.start(who));
+        else if (m.action === 'stop') reply(m, recorder.stop(who));
+        else if (m.action === 'auto') { recorder.auto = !!m.on; saveState(); broadcast({ t: 'rec', rec: recorder.state() }); reply(m, recorder.state()); }
+        else if (m.action === 'mark') { recorder.mark('mark', String(m.label || 'Mark').slice(0, 200)); reply(m, recorder.state()); }
+        else if (m.action === 'list') reply(m, recorder.list());
+        else if (m.action === 'get') reply(m, recorder.read(String(m.folder)));
+        else if (m.action === 'delete') { recorder.remove(String(m.folder), who); reply(m, recorder.list()); }
+      }
+      else if (m.t === 'notes') {
+        if (m.action === 'add') {
+          const fired = show.cues[show.lastFired];
+          const cue = fired ? `after cue ${fired.number ?? show.lastFired + 1} ${fired.label}` : show.cues[show.index] ? `before cue ${show.cues[show.index].number ?? show.index + 1}` : null;
+          const n = notes.add({ text: m.text, image: m.image, cam: m.cam, camName: devices.get(m.cam)?.name, cue, who });
+          recorder.mark('note', n.text || 'Snapshot', { note: n.id });
+          broadcast({ t: 'notes-changed' });
+          reply(m, n);
+        }
+        else if (m.action === 'list') reply(m, notes.list());
+        else if (m.action === 'delete') { notes.remove(String(m.noteId)); broadcast({ t: 'notes-changed' }); reply(m, notes.list()); }
+      }
       else if (ctx.handlers[m.t]) ws.send(JSON.stringify({ t: 'reply', id: m.id, data: await ctx.handlers[m.t](m, ws) }));
     } catch (e) {
       ws.send(JSON.stringify({ t: 'error', id: m.id, msg: e.message }));
       log({ device: m.device || 'core', level: 'error', msg: e.message, t: Date.now() });
     }
   });
-});
+}
+wss.on('connection', onConnection);
+
+// Phones only let a page use their camera over HTTPS, so the same app is also served over
+// HTTPS with a certificate made on this computer (the phone asks once to trust it).
+function startHttps() {
+  if (!HTTPS_PORT) return;
+  const dir = path.join(DATA_DIR, '.https'), certFile = path.join(dir, 'cert.pem'), keyFile = path.join(dir, 'key.pem');
+  let tls;
+  try {
+    const ips = ['127.0.0.1', ...lanIPs()];
+    tls = { cert: fs.readFileSync(certFile, 'utf8'), key: fs.readFileSync(keyFile, 'utf8') };
+    if (!selfsigned.fits(tls.cert, ips)) throw new Error('renew');
+  } catch {
+    try {
+      tls = selfsigned.make({ name: `Show Control ${os.hostname()}`, ips: ['127.0.0.1', ...lanIPs()] });
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(certFile, tls.cert); fs.writeFileSync(keyFile, tls.key, { mode: 0o600 });
+    } catch (e) { return log({ device: 'core', level: 'warn', msg: `phone cameras unavailable: could not make a certificate (${e.message})`, t: Date.now() }); }
+  }
+  const secure = https.createServer(tls, app);
+  const wss2 = new WebSocketServer({ server: secure, path: '/ws' });
+  wss2.on('connection', onConnection);
+  sockets.add(wss2);
+  secure.on('error', e => log({ device: 'core', level: 'warn', msg: `phone cameras unavailable: HTTPS port ${HTTPS_PORT} ${e.code === 'EADDRINUSE' ? 'is used by another program' : e.message}`, t: Date.now() }));
+  secure.listen(HTTPS_PORT, cfg.server?.host || '0.0.0.0', () => { httpsUp = true; broadcast({ t: 'video', video: videoInfo() }); });
+}
 
 server.listen(PORT, cfg.server?.host || '0.0.0.0', () => {
   const urls = lanAddresses().map(a => a.url);
   console.log(`Show Control "${show.name}" using ${cfgPath}`);
   console.log(`Open on iPad/phone: ${urls.join('  ') || `http://localhost:${PORT}`}${ctx.access.required() ? '  (PIN required)' : ''}`);
   if (!ctx.holdDevices) ctx.startDevices();
+  if (process.env.SHOW_VIDEO !== '0') video.start();
+  startHttps();
   events.emit('listening');
   server.emit('ready', { port: PORT, urls, mode: MODE });
 });
 
 module.exports = { server, lanAddresses };
 
+// Whatever way this process ends, the recording is closed off and the video relay stopped with it.
+process.on('exit', () => { try { recorder.stop('Show Control stopping'); } catch { /* nothing recording */ } video.stop(); });
 function shutdown() { ctx.stopDevices(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 // A bug in one driver must not take the whole show down: log it and keep running.

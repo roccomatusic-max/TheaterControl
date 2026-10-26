@@ -86,6 +86,7 @@ const PROFILES = [
   visca('marshall', 'Marshall PTZ camera', 'visca-ip', 52381),
   visca('aver', 'AVer PTZ camera', 'visca-ip', 52381),
   visca('visca', 'Other PTZ camera (VISCA)', 'visca-ip', 52381),
+  { id: 'camera', label: 'Fixed or infrared camera (video only)', category: 'cameras', type: 'camera', defaults: { night: true }, keywords: 'ir infrared night backstage wings rtsp hikvision dahua axis reolink tapo' },
   { id: 'panasonic-cam', label: 'Panasonic PTZ camera (AW-UE, AW-HE)', category: 'cameras', type: 'panasonic-cam', defaults: { presets: [] }, keywords: 'aw ue150 ue80 he40' },
   // ---- projectors
   { id: 'panasonic', label: 'Panasonic projector (PT-DZ13K, PT-DZ770 series)', category: 'projection', type: 'panasonic', defaults: { model: 'pt-dz13k', username: 'admin1' }, keywords: 'ntcontrol' },

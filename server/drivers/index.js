@@ -6,6 +6,7 @@ const drivers = {
   qlab: require('./qlab'),
   'yamaha-tf': require('./yamaha-tf'),
   ptz: require('./ptz'),
+  camera: require('./camera'),
   pjlink: require('./pjlink'),
   panasonic: require('./panasonic'),
   shure: require('./shure'),

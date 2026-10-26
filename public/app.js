@@ -61,8 +61,10 @@ function setConn(ok) {
   else offlineTimer = setTimeout(() => ($('#offline').hidden = false), 1200); // brief blips don't flash the warning
 }
 
+const extraHandlers = []; // other parts of the app (video.js) see every message first
 function handle(m) {
   (msgHandlers[m.t] || []).forEach(fn => fn(m)); // first, so other files' state is ready when the screen is drawn
+  extraHandlers.forEach(f => f(m));
   if (m.t === 'auth-required') { $('#pin').hidden = false; $('#pinInput').focus(); const saved = localStorage.getItem('pin'); if (saved) send({ t: 'auth', pin: saved }); }
   else if (m.t === 'auth-failed') { $('#pinErr').textContent = 'Wrong PIN'; localStorage.removeItem('pin'); $('#pin').hidden = false; }
   else if (m.t === 'init') {
@@ -169,7 +171,8 @@ function actionText(a) {
   const grp = String(a.device).startsWith('group:') && S.groups.find(g => g.id === a.device.slice(6));
   const d = grp ? grp.name : S.devices[a.device]?.name?.split(' · ')[0] || a.device, x = a.args || {};
   if (ACTION_TEXT[kindOf(a.device)]) return `${ACTION_TEXT[kindOf(a.device)](a)}${a.delay ? ` +${a.delay}s` : ''}`;
-  const s = { cue: `Q${x.cue}`, start: `Q${x.cue}`, scene: `scene ${String(x.bank || 'a').toUpperCase()}${x.scene}`, preset: `preset ${x.preset}`, macro: `macro ${x.macro}`,
+  const pl = a.cmd === 'preset' && S.devices[a.device]?.state?.presets?.find(p => p.n === Number(x.preset))?.label;
+  const s = { cue: `Q${x.cue}`, start: `Q${x.cue}`, scene: `scene ${String(x.bank || 'a').toUpperCase()}${x.scene}`, preset: pl ? `${pl} shot` : `preset ${x.preset}`, macro: `macro ${x.macro}`,
     shutter: x.closed ? 'shutter close' : 'shutter open', power: x.on ? 'power on' : 'power off', input: `input ${x.input}` }[a.cmd] || a.cmd;
   return `${d} ${s}${a.delay ? ` +${a.delay}s` : ''}`;
 }
@@ -232,7 +235,7 @@ function showTab() {
   setTimeout(() => update(S.show));
 
   const eos = byType('eos')[0], qlab = byType('qlab')[0];
-  const quick = h('div', { class: 'grid' }, projectors().length > 0 && projQuick(),
+  const quick = h('div', { class: 'grid' }, showCamTile(), projectors().length > 0 && projQuick(),
     eos && h('div', { class: 'card' }, h('h3', {}, eos.name), eosStatus(eos.id),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'big', onclick: () => cmd(eos.id, 'go') }, 'LX GO'), h('button', { onclick: () => cmd(eos.id, 'back') }, 'Back'))),
     qlab && h('div', { class: 'card' }, h('h3', {}, qlab.name), qlabStatus(qlab.id),
@@ -275,7 +278,7 @@ function lxTab() {
       cmdline),
     h('div', { class: 'card' }, h('h3', {}, 'Quick buttons'),
       h('div', { class: 'row' }, (S.ui.eosQuick || []).map(q => h('button', { onclick: () => cmd(eos.id, q.cmd, q.args) }, q.label)))),
-    LX_CARDS.map(f => f(eos)));
+    LX_CARDS.map(f => f(eos)), focusHelper(eos));
 }
 function statusPill(id) {
   const p = h('span', { class: 'pill' });
@@ -382,8 +385,7 @@ function projQuick() {
   projectors().forEach(p => onDevice(p.id, upd));
   return h('div', { class: 'card' }, h('h3', {}, 'Projection'), sum,
     h('div', { class: 'row', style: 'margin-top:8px' },
-      h('button', { class: 'big', onclick: () => cmd('group:all', 'shutter', { closed: true }) }, 'Close all shutters'),
-      h('button', { onclick: () => cmd('group:all', 'shutter', { closed: false }) }, 'Open all')));
+      blackoutButtons()));
 }
 
 function healthView(s) {
@@ -440,6 +442,7 @@ function projTab() {
   const common = members.length && members.every(p => p.type === members[0].type)
     ? members[0].state.inputs.filter(i => members.every(p => p.state.inputs.some(j => j.code === i.code))) : [];
   return h('div', {},
+    contentCheckCard(),
     h('div', { class: 'row', style: 'margin-bottom:10px' }, S.groups.map(x => h('button', { class: x.id === g.id ? 'on always' : 'always', onclick: () => { S.projGroup = x.id; render(); } }, x.name))),
     h('div', { class: 'card', style: 'margin-bottom:10px' }, h('h3', {}, `${g.name} · ${members.length} projector${members.length === 1 ? '' : 's'}`),
       h('div', { class: 'row' },
@@ -463,13 +466,13 @@ const CATALOG = {
   'yamaha-tf': { scene: [['bank', 'select:a|b', 'a', 'Bank'], ['scene', 'number', 1, 'Scene']],
     level: [['strip', 'select:dca|ch|master', 'dca', 'Fader'], ['index', 'n1', 0, 'Number'], ['db', 'number', 0, 'Level dB']],
     on: [['strip', 'select:ch|dca|master', 'ch', 'Fader'], ['index', 'n1', 0, 'Number'], ['on', 'bool:On|Off', true, 'Set to']] },
-  ptz: { preset: [['preset', 'number', 1, 'Preset']], home: [], tally: [['on', 'bool:On|Off', true, 'Tally']] },
+  ptz: { preset: [['preset', 'preset', 1, 'Shot']], home: [], tally: [['on', 'bool:On|Off', true, 'Tally']], night: [['on', 'bool:On|Off', true, 'Night (IR)']] },
   projector: { shutter: [['closed', 'bool:Close|Open', true, 'Shutter']], power: [['on', 'bool:On|Off', true, 'Power']], input: [['input', 'input', '', 'Input']] },
   osc: { send: [['address', 'text', '/', 'OSC address']] },
 };
 const CMD_LABEL = { cue: 'Fire cue', go: 'GO', back: 'Back', macro: 'Fire macro', sub: 'Sub level', chan: 'Channel level', cmdline: 'Command line',
   start: 'Start cue', stop: 'Stop all', panic: 'Panic (fade out all)', pause: 'Pause all', resume: 'Resume all', playhead: 'Move playhead to',
-  scene: 'Recall scene', level: 'Set fader', on: 'Fader on/off', preset: 'Go to preset', home: 'Home', tally: 'Tally light',
+  scene: 'Recall scene', level: 'Set fader', on: 'Fader on/off', preset: 'Go to preset shot', home: 'Home', tally: 'Tally light', night: 'Night mode (infrared)',
   shutter: 'Shutter', power: 'Power', input: 'Input', send: 'Send OSC' };
 // Filled in by other screens (mics.js): dropdown choices for 'pick:<name>' fields, and how a kind of device's cue steps read.
 const PICKERS = {}, ACTION_TEXT = {};
@@ -506,6 +509,12 @@ function field(a, [key, type, def, label], onChange) {
   if (type.startsWith('select:')) input = h('select', { onchange: e => set(e.target.value) }, type.slice(7).split('|').map(o => h('option', { value: o, selected: o === val }, o.toUpperCase())));
   else if (type.startsWith('bool:')) { const [yes, no] = type.slice(5).split('|'); input = h('select', { onchange: e => set(e.target.value === '1') }, h('option', { value: '1', selected: !!val }, yes), h('option', { value: '0', selected: !val }, no)); }
   else if (type === 'n1') input = h('input', { inputmode: 'numeric', value: Number(val) + 1, onchange: e => set(Math.max(0, Number(e.target.value) - 1)) });
+  else if (type === 'preset') {
+    const ps = S.devices[a.device]?.state?.presets || [];
+    input = ps.length ? h('select', { onchange: e => set(Number(e.target.value)) }, ps.some(p => p.n === Number(val)) ? '' : h('option', { value: val, selected: true }, `Preset ${val}`),
+      ps.map(p => h('option', { value: p.n, selected: p.n === Number(val) }, `${p.n} · ${p.label}`)))
+      : h('input', { inputmode: 'numeric', value: val, onchange: e => set(Number(e.target.value)) });
+  }
   else if (type === 'input') {
     const d = S.devices[a.device], opts = d?.state?.inputs || [];
     input = opts.length ? h('select', { onchange: e => set(e.target.value) }, h('option', { value: '' }, 'Choose…'), opts.map(i => h('option', { value: i.code, selected: i.code === val }, i.label)))
@@ -590,105 +599,7 @@ function editTab() {
   return wrap;
 }
 
-// ---------- Cameras ----------
-function simView(camId) {
-  // Stand-in for a real video feed: a virtual stage that pans/zooms with the simulated camera.
-  const c = h('canvas', { width: 640, height: 360 });
-  const g = c.getContext('2d');
-  const draw = () => {
-    if (!c.isConnected) return;
-    const st = S.devices[camId]?.state || {};
-    const pan = (st.pan || 0) / 2448, tilt = (st.tilt || 0) / 1296, z = 1 + (st.zoom || 0) / 0x4000 * 5;
-    g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#05070a'; g.fillRect(0, 0, 640, 360);
-    g.translate(320, 180); g.scale(z, z); g.translate(-pan * 600, tilt * 200);
-    g.fillStyle = '#2b1d14'; g.fillRect(-700, 40, 1400, 160);               // stage deck
-    g.fillStyle = '#5b0f14'; g.fillRect(-720, -260, 120, 300); g.fillRect(600, -260, 120, 300); // proscenium legs
-    const t = performance.now() / 1000;
-    [[-300, '#ffd27a'], [0, '#9ad1ff'], [300, '#ff9ad5']].forEach(([x, col], i) => {
-      const grd = g.createRadialGradient(x, 120, 5, x, 120, 120); grd.addColorStop(0, col + 'aa'); grd.addColorStop(1, '#0000');
-      g.fillStyle = grd; g.fillRect(x - 120, 0, 240, 240);
-      g.fillStyle = '#ddd'; const bob = Math.sin(t * 2 + i) * 4;
-      g.beginPath(); g.arc(x, 40 + bob, 12, 0, 7); g.fill(); g.fillRect(x - 10, 54 + bob, 20, 50);
-    });
-    g.fillStyle = '#111'; g.fillRect(-250, 200, 500, 80);                    // pit
-    g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#fff8'; g.font = '13px monospace';
-    g.fillText(`SIM ${camId}  P${st.pan ?? '-'} T${st.tilt ?? '-'} Z${st.zoom ?? '-'}`, 10, 20);
-    requestAnimationFrame(draw);
-  };
-  requestAnimationFrame(draw);
-  return c;
-}
-function videoEl(cam) {
-  const s = cam.state.stream || {};
-  switch (s.type) {
-    case 'sim': return simView(cam.id);
-    case 'go2rtc': return h('iframe', { src: `${s.url}/stream.html?src=${encodeURIComponent(s.src || cam.id)}&mode=webrtc,mse,hls,mjpeg`, allow: 'autoplay; fullscreen' });
-    case 'mediamtx': return h('iframe', { src: `${s.url}/${encodeURIComponent(s.src || cam.id)}`, allow: 'autoplay; fullscreen' });
-    case 'mjpeg': return h('img', { src: s.url, alt: cam.name });
-    case 'hls': return h('video', { src: s.url, autoplay: '', muted: '', playsinline: '', controls: '' });
-    case 'iframe': return h('iframe', { src: s.url, allow: 'autoplay; fullscreen' });
-    default: return h('div', { style: 'display:grid;place-items:center;color:var(--dim)' }, 'No video configured');
-  }
-}
-function joystick(onVec) {
-  const knob = h('div', { class: 'knob' });
-  const el = h('div', { class: 'joy' }, knob);
-  let active = false, vec = [0, 0], timer;
-  const setFrom = e => {
-    const r = el.getBoundingClientRect(), R = r.width / 2;
-    let x = (e.clientX - r.left - R) / R, y = (e.clientY - r.top - R) / R;
-    const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
-    vec = [x, -y]; knob.style.transform = `translate(${x * R * 0.6}px, ${y * R * 0.6}px)`;
-  };
-  el.addEventListener('pointerdown', e => { active = true; el.setPointerCapture(e.pointerId); setFrom(e); onVec(...vec); timer = setInterval(() => onVec(...vec), 120); });
-  el.addEventListener('pointermove', e => active && setFrom(e));
-  const end = () => { if (!active) return; active = false; clearInterval(timer); knob.style.transform = ''; onVec(0, 0); };
-  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
-  return el;
-}
-function holdBtn(label, onDown, onUp) {
-  const b = h('button', {}, label);
-  b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); onDown(); });
-  b.addEventListener('pointerup', onUp); b.addEventListener('pointercancel', onUp);
-  return b;
-}
-function camCard(cam, expanded) {
-  const view = h('div', { class: 'view' }, videoEl(cam), h('div', { class: 'osd' }, cam.name));
-  onDevice(cam.id, d => view.classList.toggle('tally', !!d.state.tally));
-  const presets = h('div', { class: 'presets' });
-  onDevice(cam.id, d => presets.replaceChildren(...(d.state.presets.length ? d.state.presets : [1, 2, 3, 4, 5, 6].map(n => ({ n, label: `P${n}` }))).map(p => {
-    const b = h('button', { class: d.state.lastPreset === p.n ? 'cur' : '' }, p.label);
-    let t; // tap = recall, long-press = store
-    b.addEventListener('pointerdown', () => { t = setTimeout(() => { t = null; if (confirm(`Store current shot as "${p.label}" on ${cam.name}?`)) cmd(cam.id, 'store', { preset: p.n }); }, 800); });
-    b.addEventListener('pointerup', () => { if (t) { clearTimeout(t); cmd(cam.id, 'preset', { preset: p.n }); } });
-    b.addEventListener('pointercancel', () => clearTimeout(t));
-    return b;
-  })));
-  const card = h('div', { class: 'card' }, h('h3', {}, cam.name, statusPill(cam.id)), view);
-  if (!expanded) return card;
-  card.classList.add('camfull');
-  card.append(h('div', { class: 'camctl' },
-    joystick((x, y) => cmd(cam.id, 'move', { pan: x, tilt: y })),
-    h('div', { class: 'camside' },
-      h('div', { class: 'zoom' }, holdBtn('Zoom −', () => cmd(cam.id, 'zoom', { speed: -0.6 }), () => cmd(cam.id, 'zoom', { speed: 0 })),
-        holdBtn('Zoom +', () => cmd(cam.id, 'zoom', { speed: 0.6 }), () => cmd(cam.id, 'zoom', { speed: 0 })),
-        h('button', { onclick: () => cmd(cam.id, 'home') }, 'Home')),
-      h('div', { class: 'row', style: 'margin-top:6px' }, h('button', { onclick: () => cmd(cam.id, 'focus', { mode: 'auto' }) }, 'AF'),
-        h('button', { onclick: () => cmd(cam.id, 'focus', { mode: 'onepush' }) }, 'Push AF'),
-        h('button', { onclick: () => cmd(cam.id, 'tally', { on: !S.devices[cam.id].state.tally }) }, 'Tally')),
-      presets)));
-  return card;
-}
-function camTab() {
-  const cams = [...byType('ptz'), ...byType('panasonic-cam')];
-  if (!cams.length) return h('div', { class: 'card' }, 'No cameras configured.');
-  S.camSel ||= cams[0].id;
-  const tabs = h('div', { class: 'row', style: 'margin-bottom:10px' },
-    h('button', { class: S.camSel === 'all' ? 'on always' : 'always', onclick: () => { S.camSel = 'all'; render(); } }, 'All'),
-    cams.map(c => h('button', { class: S.camSel === c.id ? 'on always' : 'always', onclick: () => { S.camSel = c.id; render(); } }, c.name.split(' · ')[0])));
-  if (S.camSel === 'all') return h('div', {}, tabs, h('div', { class: 'cams' }, cams.map(c => camCard(c, false))));
-  return h('div', {}, tabs, camCard(S.devices[S.camSel], true));
-}
+// ---------- Cameras: see video.js ----------
 
 // ---------- System ----------
 function sysTab() {
@@ -706,7 +617,7 @@ function sysTab() {
       screen('/foh.html', 'Front of house', 'House open / closed / hold for the stage manager, calls, lobby message'),
       screen('/lobby.html', 'Lobby TV', 'Big countdown to the start or end of the interval')),
     h('p', { class: 'hint' }, `On another phone or iPad, open ${location.origin} followed by the page name, e.g. ${location.origin}/crew.html`));
-  return h('div', { class: 'grid' }, setupCard(), SYS_CARDS.map(f => f()), screens, h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
+  return h('div', { class: 'grid' }, setupCard(), SYS_CARDS.map(f => f()), screens, screensCard(), h('div', { class: 'card' }, h('h3', {}, 'Devices'), devs),
     h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Log'), log));
 }
 
