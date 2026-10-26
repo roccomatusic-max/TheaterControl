@@ -33,8 +33,11 @@ const byType = t => Object.values(S.devices).filter(d => d.type === t);
 // ---------- connection ----------
 let ws, wsTimer;
 let wsHost = () => location.host; // failover.js moves to the backup computer when this one stops
+// This iPad or phone's own id (kept on the device): the server knows the screen from the first
+// moment, so a limit set on System > Screens applies before anything is pressed.
+const myScreenId = () => { try { return localStorage.getItem('screenId') || (localStorage.setItem('screenId', `s${Math.random().toString(36).slice(2, 12)}`), localStorage.getItem('screenId')); } catch { return ''; } };
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${wsHost()}/ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${wsHost()}/ws?screen=${encodeURIComponent(myScreenId() || '')}`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500); };
   ws.onmessage = e => handle(JSON.parse(e.data));
@@ -601,6 +604,31 @@ function editTab() {
 
 // ---------- Cameras: see video.js ----------
 
+// A Chromebook, Android tablet or spare iPad that shows only one crew screen (public/crew/common.js):
+// a QR code / link that opens the page in kiosk mode, with the job fixed for a crew cue light.
+async function kioskSheet(href, name) {
+  let base = location.origin;
+  if (/^(localhost|127\.)/.test(location.hostname)) try { const u = (await (await fetch('api/health')).json()).addresses?.[0]?.url; if (u) base = u; } catch { /* stay on this address */ }
+  const box = h('div', { class: 'linkbox' });
+  const jobs = href === '/crew.html' ? (S.crew?.roles || []) : [];
+  const job = jobs.length ? h('select', { onchange: () => draw() }, h('option', { value: '' }, 'Let them choose'), jobs.map(r => h('option', { value: r }, r))) : null;
+  const draw = () => {
+    const url = `${base}${href}?kiosk=1${job?.value ? `&job=${encodeURIComponent(job.value)}` : ''}`;
+    box.replaceChildren(h('img', { class: 'qr', src: `api/qr?text=${encodeURIComponent(url)}`, alt: '' }),
+      h('div', {}, h('div', { class: 'mono url' }, url), h('button', { class: 'always', onclick: () => { navigator.clipboard?.writeText(url).then(() => toast('Link copied'), () => toast(url, 8000)); } }, 'Copy link')));
+  };
+  draw();
+  sheet(h('h2', {}, `${name}: kiosk screen`),
+    h('p', {}, 'For a Chromebook, tablet or spare iPad that only ever shows this screen. Open this link on it once (scan the code or type it in): it remembers, goes full screen at the first tap, stays awake, hides the way off the page, and reloads itself if it loses Show Control.'),
+    job && h('label', { class: 'form' }, 'Job on this screen', job),
+    box,
+    h('ul', { class: 'hint' },
+      h('li', {}, 'Chromebook: open the link in Chrome, then ⋮ → Cast, save and share → Create shortcut, tick "Open as window". Pin it to the shelf, and in Settings → Device → Power set the screen to stay on while charging.'),
+      h('li', {}, 'Android tablet: open the link in Chrome, ⋮ → Add to Home screen. Settings → Security → App pinning keeps it on this screen.'),
+      h('li', {}, 'iPad: Share → Add to Home Screen, then Settings → Accessibility → Guided Access to keep it on this screen.'),
+      h('li', {}, 'To leave kiosk mode, press and hold the clock for 3 seconds (it asks for the admin PIN, if there is one).')));
+}
+
 // ---------- System ----------
 function sysTab() {
   const log = h('div', { class: 'log' });
@@ -609,7 +637,8 @@ function sysTab() {
   (updaters.__log ||= []).push(e => { const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20; log.append(line(e)); if (atBottom) log.scrollTop = log.scrollHeight; });
   setTimeout(() => (log.scrollTop = log.scrollHeight));
   const devs = h('div', { class: 'kv' }, Object.values(S.devices).filter(d => d.type !== 'mics').map(d => [h('b', {}, d.name), h('span', {}, statusPill(d.id), ' ', h('span', { class: 'mono' }, d.type))]));
-  const screen = (href, name, what) => h('div', {}, h('a', { href, target: '_blank', style: 'color:#9cc4ff;font-weight:600' }, name), h('div', { class: 'dim', style: 'font-size:13px' }, what));
+  const screen = (href, name, what) => h('div', { class: 'crewscreen' }, h('div', {}, h('a', { href, target: '_blank', style: 'color:#9cc4ff;font-weight:600' }, name), h('div', { class: 'dim', style: 'font-size:13px' }, what)),
+    h('button', { class: 'mini always', onclick: () => kioskSheet(href, name) }, 'Kiosk…'));
   const screens = h('div', { class: 'card' }, h('h3', {}, 'Stage manager and crew screens'),
     h('div', { style: 'display:grid;gap:10px' },
       screen('/sm.html', 'Stage manager', 'Big GO, standby with crew ready, calls, notes, script, checklist, countdown'),

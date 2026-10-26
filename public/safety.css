@@ -115,3 +115,7 @@ p.small, .small { font-size: 13px; }
 .urls { display: grid; gap: 4px; word-break: break-all; background: var(--panel2); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
 .oscport { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px 36px; font-size: 14px; color: var(--dim); }
 .learning { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: #3a2c0b; color: #f8d48a; font-weight: 700; }
+.limitrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.limitrow select { width: auto; min-width: 170px; padding: 6px 8px; }
+.form.limitrow { margin-bottom: 10px; }
+.form.limitrow .hint { flex-basis: 100%; }

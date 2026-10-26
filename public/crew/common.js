@@ -27,8 +27,11 @@ const setMe = (k, v) => localStorage.setItem(k === 'name' ? 'crewName' : 'crewRo
 // ---------- connection ----------
 let ws, wsTimer, seq = 0;
 const pending = {};
+// Same id as the main app on this device, so System > Screens lists it and can limit what it may do.
+const screenId = (() => { try { return localStorage.getItem('screenId') || (localStorage.setItem('screenId', `s${Math.random().toString(36).slice(2, 12)}`), localStorage.getItem('screenId')); } catch { return ''; } })();
+const PAGE = location.pathname.replace(/^\/|\.html$/g, '') || 'crew';
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?screen=${encodeURIComponent(screenId)}`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500); };
   ws.onmessage = e => handle(JSON.parse(e.data));
@@ -50,6 +53,7 @@ function setConn(ok) {
   const p = $('#conn');
   if (p) { p.textContent = ok ? (C.mode === 'practice' ? 'practice' : 'live') : 'offline'; p.className = 'pill ' + (ok ? (C.mode === 'practice' ? 'warn' : 'ok') : 'off'); }
   clearTimeout(offlineTimer);
+  C.lostAt = ok ? null : C.lostAt || Date.now();
   if (ok) offlineEl.hidden = true;
   else offlineTimer = setTimeout(() => (offlineEl.hidden = false), 1200);
 }
@@ -62,6 +66,9 @@ function handle(m) {
     C.devices = Object.fromEntries(m.devices.map(d => [d.id, d]));
     setConn(true);
     document.title = `${document.title.split(' · ')[0]} · ${m.show.name}`;
+    C.role = m.role || 'admin'; C.signin = !!m.signin;
+    reloadIfUpdated(m.version);
+    screenHello();
     emit('init');
   }
   else if (m.t === 'show') { C.show = m.show; C.skew = m.show.now - Date.now(); emit('show'); }
@@ -73,6 +80,77 @@ function handle(m) {
   else if (m.t === 'reply') { pending[m.id]?.(m.data); delete pending[m.id]; }
   else if (m.t === 'saved') { pending[m.id]?.({ ok: true }); delete pending[m.id]; }
   else if (m.t === 'error') { if (pending[m.id]) { pending[m.id]({ error: m.msg }); delete pending[m.id]; } else toast(m.msg, 5000); }
+}
+
+// ---------- kiosk ----------
+// A Chromebook, Android tablet or spare iPad that only ever shows this one screen, e.g. a cue light
+// on the fly floor. Open the page once with ?kiosk=1 (crew.html?kiosk=1&job=Fly%20floor also fixes the
+// job); the device remembers it. Kiosk screens go full screen at the first tap, stay awake, hide
+// everything that leads off the page, reload themselves if they lose Show Control for a while, and
+// warn when their battery runs low. Press and hold the clock for 3 seconds to leave kiosk mode.
+const KIOSK = (() => {
+  const key = `kiosk:${PAGE}`, q = new URLSearchParams(location.search);
+  try {
+    if (q.get('kiosk') === '0') { localStorage.removeItem(key); return null; }
+    if (q.has('kiosk')) localStorage.setItem(key, JSON.stringify({ job: q.get('job') || '', name: q.get('name') || '' }));
+    return JSON.parse(localStorage.getItem(key) || 'null');
+  } catch { return q.has('kiosk') && q.get('kiosk') !== '0' ? { job: q.get('job') || '', name: q.get('name') || '' } : null; }
+})();
+if (KIOSK) {
+  document.documentElement.classList.add('kiosk');
+  if (KIOSK.job) setMe('role', KIOSK.job);
+  if (KIOSK.name || (KIOSK.job && !me().name)) setMe('name', KIOSK.name || KIOSK.job);
+}
+function setupKiosk() {
+  if (!KIOSK) return;
+  const root = document.documentElement;
+  const full = () => { if (!document.fullscreenElement && !document.webkitFullscreenElement) (root.requestFullscreen || root.webkitRequestFullscreen)?.call(root)?.catch?.(() => {}); };
+  // browsers only allow full screen from a tap, so every tap tries again until it sticks
+  document.addEventListener('click', full, true);
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('fullscreenchange', keepAwake);
+  // the mouse pointer (Chromebook trackpad) hides when not used
+  let idle;
+  document.addEventListener('pointermove', () => { root.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(() => root.classList.add('idle'), 4000); });
+  // Not connected for 30 seconds: reload, in case the page itself is stuck. (Reconnecting is automatic
+  // before that, and this page holds nothing that would be lost.)
+  setInterval(() => { if (ws?.readyState !== 1 && Date.now() - (C.lostAt || Date.now()) > 30e3) location.reload(); }, 5000);
+  const bat = h('div', { class: 'kiosk-battery', hidden: '' });
+  document.body.append(bat);
+  navigator.getBattery?.().then(b => {
+    const show = () => { bat.hidden = b.charging || b.level > 0.2; bat.textContent = `🔋 ${Math.round(b.level * 100)}%: plug this screen in`; };
+    b.addEventListener('levelchange', show); b.addEventListener('chargingchange', show); show();
+  }).catch(() => {});
+  // press and hold the clock for 3 seconds to leave kiosk mode (needs the admin PIN, if there is one)
+  const clockEl = $('#clock')?.parentElement || $('header');
+  let hold;
+  clockEl?.addEventListener('pointerdown', () => { hold = setTimeout(leaveKiosk, 3000); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) clockEl?.addEventListener(ev, () => clearTimeout(hold));
+}
+async function leaveKiosk() {
+  const pin = C.signin ? prompt('Admin PIN to leave kiosk mode') : (confirm('Leave kiosk mode on this screen?') ? '' : null);
+  if (pin == null) return;
+  const id = ++seq;
+  send({ t: 'kiosk-exit', id, pin });
+  pending[id] = r => {
+    if (r?.error) return toast(r.error, 4000);
+    try { localStorage.removeItem(`kiosk:${PAGE}`); } catch { /* private mode */ }
+    document.exitFullscreen?.().catch(() => {});
+    location.replace(location.pathname);
+  };
+}
+
+// Listed on System > Screens with the crew member's name and job.
+function screenHello() {
+  if (!screenId) return;
+  const who = me(), name = localStorage.getItem('screenName') || [who.name, who.role].filter(Boolean).join(' · ') || C.defaultName || 'Crew screen';
+  send({ t: 'screen-hello', id: ++seq, screen: screenId, name, view: { tab: PAGE, role: who.role || null, kiosk: KIOSK || null } });
+}
+// After a one-tap update the server runs a new version: load the new pages too (they are tiny).
+let seenVersion = null;
+function reloadIfUpdated(v) {
+  if (v && seenVersion && v !== seenVersion) location.reload();
+  if (v) seenVersion = v;
 }
 
 // ---------- page furniture ----------
@@ -135,6 +213,7 @@ const fohPill = () => { const f = C.crew?.foh || {}; return h('span', { class: `
 function boot() {
   document.body.append(pinEl, offlineEl, toastEl);
   setInterval(() => emit('tick'), 250);
+  setupKiosk();
   keepAwake();
   connect();
 }

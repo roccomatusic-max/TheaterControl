@@ -4,7 +4,8 @@
 // the show computer, so any screen sees the same show.)
 module.exports = function screens(ctx) {
   const list = new Map(); // id → { id, name, role, who, view, sockets, connected, lastSeen }
-  const pub = () => [...list.values()].map(({ sockets, ...s }) => s).sort((a, b) => b.connected - a.connected || b.lastSeen - a.lastSeen);
+  // limit: the most this screen may do (System > Screens; features/access.js)
+  const pub = () => [...list.values()].map(({ sockets, ...s }) => ({ ...s, limit: ctx.access?.screenLimit?.(s.id) || 'admin' })).sort((a, b) => b.connected - a.connected || b.lastSeen - a.lastSeen);
   const publish = () => ctx.broadcast({ t: 'screens', screens: pub() });
   const clean = (v, n) => String(v ?? '').trim().slice(0, n);
 
@@ -43,5 +44,6 @@ module.exports = function screens(ctx) {
   };
   ctx.handlers['screen-forget'] = m => { list.delete(clean(m.screen, 40)); publish(); return { ok: true }; };
   for (const t of ['screen-hello', 'screens-list', 'screen-takeover']) ctx.access?.viewerMay(t);
+  ctx.events.on('screen-limits', publish);
   ctx.initExtras.push(() => ({ screens: pub() }));
 };

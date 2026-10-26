@@ -1,7 +1,17 @@
 // ---------- System tab: updates ----------
 'use strict';
 const UPDATE_STAGES = { download: 'Downloading', unpack: 'Unpacking', check: 'Checking it runs on this computer', restart: 'Restarting into the new version', error: 'The update stopped' };
-onMsg('init', m => { S.appVersion = m.version; S.updateAvailable = m.updateAvailable; });
+onMsg('init', m => {
+  // The show computer now runs another version (one-tap update): load its screens too, so this iPad
+  // never runs old buttons against a new server. Not while carried over to the backup computer (a
+  // reload would go back to the stopped one), and not in the middle of editing cues or setup, where
+  // a reload would lose changes: say so instead.
+  if (S.appVersion && m.version && m.version !== S.appVersion) {
+    if (['edit', 'setup', 'wizard'].includes(S.tab) || wsHost() !== location.host) toast(`Show Control is now version ${m.version}. Save, then reload this page.`, 10000);
+    else return location.reload();
+  }
+  S.appVersion = m.version; S.updateAvailable = m.updateAvailable;
+});
 onMsg('update', m => { S.updateInfo = m.update; S.updateAvailable = m.update.newer ? m.update.latest.version : null; if (S.tab === 'sys') drawUpdate?.(m.update); });
 let drawUpdate = null;
 SYS_CARDS.push(() => {

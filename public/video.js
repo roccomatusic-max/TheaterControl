@@ -6,7 +6,7 @@ const PTZ_TYPES = ['ptz', 'panasonic-cam']; // cameras that move
 const CAM_TYPES = [...PTZ_TYPES, 'camera'];
 const cameras = () => Object.values(S.devices).filter(d => CAM_TYPES.includes(d.type));
 const shortName = d => (d?.name || '').split(' · ')[0];
-const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* private mode */ } } };
+const vstore = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* private mode */ } } };
 
 function askServer(t, payload = {}, ms = 20000) {
   const id = ++cmdSeq;
@@ -78,8 +78,8 @@ function camView(cam, { tools = true } = {}) {
   const v = videoEl(cam);
   const view = h('div', { class: 'view' }, v.el, h('div', { class: 'osd' }, cam.name));
   const nightKey = `night:${cam.id}`;
-  const setNight = on => { view.classList.toggle('night', on); store.set(nightKey, on ? '1' : null); };
-  setNight(store.get(nightKey) ? true : !!S.devices[cam.id]?.state.night && cam.type === 'camera');
+  const setNight = on => { view.classList.toggle('night', on); vstore.set(nightKey, on ? '1' : null); };
+  setNight(vstore.get(nightKey) ? true : !!S.devices[cam.id]?.state.night && cam.type === 'camera');
   onDevice(cam.id, d => view.classList.toggle('tally', !!d.state.tally));
   if (!tools) return view;
   const isVideo = v.media?.tagName === 'VIDEO';
@@ -217,13 +217,13 @@ function videoStatus() {
 
 // Several cameras at once: an even grid, or one big picture with the others small beside it.
 function multiView(cams) {
-  const layout = store.get('camLayout') || 'grid';
-  const big = S.devices[store.get('camBig')] ? store.get('camBig') : cams[0].id;
+  const layout = vstore.get('camLayout') || 'grid';
+  const big = S.devices[vstore.get('camBig')] ? vstore.get('camBig') : cams[0].id;
   const bar = h('div', { class: 'row', style: 'margin-bottom:8px' },
-    h('button', { class: layout === 'grid' ? 'on always' : 'always', onclick: () => { store.set('camLayout', 'grid'); render(); } }, 'Grid'),
-    h('button', { class: layout === 'focus' ? 'on always' : 'always', onclick: () => { store.set('camLayout', 'focus'); render(); } }, 'One big'));
+    h('button', { class: layout === 'grid' ? 'on always' : 'always', onclick: () => { vstore.set('camLayout', 'grid'); render(); } }, 'Grid'),
+    h('button', { class: layout === 'focus' ? 'on always' : 'always', onclick: () => { vstore.set('camLayout', 'focus'); render(); } }, 'One big'));
   if (layout === 'grid') return h('div', {}, bar, h('div', { class: 'cams' }, cams.map(c => camCard(c, false))));
-  const small = cams.filter(c => c.id !== big).map(c => h('div', { class: 'card small', onclick: e => { if (e.target.closest('.vtools')) return; store.set('camBig', c.id); render(); } },
+  const small = cams.filter(c => c.id !== big).map(c => h('div', { class: 'card small', onclick: e => { if (e.target.closest('.vtools')) return; vstore.set('camBig', c.id); render(); } },
     h('h3', {}, shortName(c), h('span', { class: 'dim' }, 'tap to swap')), camView(c, { tools: false })));
   return h('div', {}, bar, h('div', { class: 'focuslayout' }, camCard(S.devices[big], false), h('div', { class: 'strip-cams' }, small)));
 }
@@ -232,8 +232,8 @@ function multiView(cams) {
 function showCamTile() {
   const cams = cameras();
   if (!cams.length) return null;
-  const id = store.get('showCam');
-  const sel = h('select', { onchange: e => { store.set('showCam', e.target.value || null); render(); } },
+  const id = vstore.get('showCam');
+  const sel = h('select', { onchange: e => { vstore.set('showCam', e.target.value || null); render(); } },
     h('option', { value: '' }, 'No camera'), cams.map(c => h('option', { value: c.id, selected: c.id === id }, c.name)));
   const cam = S.devices[id];
   return h('div', { class: 'card' }, h('h3', {}, 'Camera', sel), cam ? camView(cam) : h('p', { class: 'dim', style: 'margin:0' }, 'Pick a camera to keep the stage in view here.'));
@@ -348,8 +348,8 @@ function screensCard() {
   const body = h('div', { class: 'screens' });
   const draw = () => {
     const base = `${location.protocol}//${host.name}${location.port ? `:${location.port}` : ''}`;
-    const camId = store.get('tvCam') || cams[0]?.id;
-    const sel = h('select', { onchange: e => { store.set('tvCam', e.target.value); draw(); } }, cams.map(c => h('option', { value: c.id, selected: c.id === camId }, c.name)));
+    const camId = vstore.get('tvCam') || cams[0]?.id;
+    const sel = h('select', { onchange: e => { vstore.set('tvCam', e.target.value); draw(); } }, cams.map(c => h('option', { value: c.id, selected: c.id === camId }, c.name)));
     const https = S.video?.httpsPort;
     body.replaceChildren(
       cams.length ? h('div', {}, h('label', { class: 'form' }, 'Camera for the screens', sel),
@@ -372,9 +372,9 @@ function screensCard() {
 // Watch the stage on a camera while nudging a moving light from the iPad.
 function focusHelper(eos) {
   const cams = cameras();
-  const camId = S.devices[store.get('focusCam')] ? store.get('focusCam') : cams[0]?.id;
-  const chan = h('input', { inputmode: 'numeric', placeholder: 'Chan', style: 'width:90px', value: store.get('focusChan') || '' });
-  chan.addEventListener('change', () => store.set('focusChan', chan.value));
+  const camId = S.devices[vstore.get('focusCam')] ? vstore.get('focusCam') : cams[0]?.id;
+  const chan = h('input', { inputmode: 'numeric', placeholder: 'Chan', style: 'width:90px', value: vstore.get('focusChan') || '' });
+  chan.addEventListener('change', () => vstore.set('focusChan', chan.value));
   const fine = h('input', { type: 'checkbox' });
   const c = () => chan.value.trim();
   const sel = op => { if (!c()) return toast('Type a channel number'); cmd(eos.id, 'cmdline', { text: `Chan ${c()}${op ? ` ${op}` : ''}#` }); };
@@ -385,7 +385,7 @@ function focusHelper(eos) {
     h('span'), repeatBtn('▼', wheel('tilt', -1), 150, { class: 'always' }), h('span'));
   const pair = (label, param) => h('div', { class: 'row', style: 'align-items:center' }, h('b', { style: 'width:52px' }, label),
     repeatBtn('−', wheel(param, -1)), repeatBtn('+', wheel(param, 1)));
-  const camSel = cams.length > 1 && h('select', { onchange: e => { store.set('focusCam', e.target.value); render(); } }, cams.map(x => h('option', { value: x.id, selected: x.id === camId }, x.name)));
+  const camSel = cams.length > 1 && h('select', { onchange: e => { vstore.set('focusCam', e.target.value); render(); } }, cams.map(x => h('option', { value: x.id, selected: x.id === camId }, x.name)));
   return h('div', { class: 'card', style: 'grid-column:1/-1' }, h('h3', {}, 'Focus helper', camSel || ''),
     h('div', { class: 'focushelp' },
       camId ? camView(S.devices[camId]) : h('p', { class: 'dim' }, 'Add a camera to watch the stage here.'),

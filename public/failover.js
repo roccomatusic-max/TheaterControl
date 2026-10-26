@@ -88,7 +88,16 @@ onMsg('init', m => {
   if (isNew && !offered && gone.length && !(S.failover && !S.failover.active)) { offered = true; setTimeout(() => offerTakeover(gone), 300); }
 });
 onMsg('screens', m => { S.screens = m.screens; (updaters.__screens || []).forEach(f => f()); });
-const TAB_WORDS = { show: 'Show', lx: 'Lighting', snd: 'Sound', proj: 'Projection', cam: 'Cameras', sys: 'System', edit: 'Edit cues', setup: 'Setup', health: 'Health', history: 'Cue list history', map: 'Scene map', dept: 'Second operator' };
+const TAB_WORDS = { show: 'Show', lx: 'Lighting', snd: 'Sound', proj: 'Projection', cam: 'Cameras', sys: 'System', edit: 'Edit cues', setup: 'Setup', health: 'Health', history: 'Cue list history', map: 'Scene map', dept: 'Second operator',
+  sm: 'Stage manager screen', crew: 'Crew screen', foh: 'Front of house screen', lobby: 'Lobby countdown' };
+// What a screen may do at most (features/access.js). The admin PIN and the show computer itself always get everything.
+const LIMITS = [['admin', 'Everything'], ['operator', 'Run the show'], ['viewer', 'Crew & watch only']];
+async function setLimit(payload) {
+  const r = await ask('screen-limit-set', payload);
+  if (r.error) toast(r.error, 5000); else { S.newScreens = r.newScreens; toast('Saved'); }
+  (updaters.__screens || []).forEach(f => f());
+}
+onMsg('init', m => { S.newScreens = m.newScreens || 'admin'; });
 async function carryOn(s, force) {
   const r = await ask('screen-takeover', { from: s.id, force });
   if (r.error) { if (/still connected/.test(r.error) && confirm(r.error)) return carryOn(s, true); return toast(r.error, 5000); }
@@ -111,12 +120,20 @@ function offerTakeover(gone) {
 }
 SYS_CARDS.push(() => {
   const list = h('div', { class: 'screens' });
-  const draw = () => list.replaceChildren(...(S.screens || []).map(s => h('div', { class: `scr ${s.connected ? 'on' : 'off'}` },
-    h('div', {}, h('b', {}, s.name), s.id === screenId ? h('span', { class: 'pill' }, 'this screen') : '',
-      h('div', { class: 'dim' }, `${s.role === 'viewer' ? 'Watch only' : s.role === 'operator' ? 'Operator' : 'Admin'} · ${TAB_WORDS[s.view?.tab] || '—'} · ${s.connected ? `connected (${s.who})` : `dropped off at ${at(s.lastSeen)}`}`)),
+  const fresh = h('div');
+  const limitSel = (value, onchange, disabled) => h('select', { class: 'limit', disabled, onchange: e => onchange(e.target.value) }, LIMITS.map(([v, l]) => h('option', { value: v, selected: v === value }, l)));
+  const draw = () => {
+    const admin = S.role === 'admin';
+    fresh.replaceChildren(admin ? h('label', { class: 'form limitrow' }, 'New screens may do', limitSel(S.newScreens || 'admin', v => setLimit({ newScreens: v })),
+      h('span', { class: 'hint' }, 'Set "Crew & watch only" before the crew arrive, so a phone that opens Show Control can\'t press GO or change anything. Screens already listed keep their own setting.')) : '');
+    list.replaceChildren(...(S.screens || []).map(s => h('div', { class: `scr ${s.connected ? 'on' : 'off'}` },
+    h('div', {}, h('b', {}, s.name), s.id === screenId ? h('span', { class: 'pill' }, 'this screen') : '', s.view?.kiosk ? h('span', { class: 'pill' }, 'kiosk') : '',
+      h('div', { class: 'dim' }, `${s.role === 'viewer' ? 'Watch only' : s.role === 'operator' ? 'Operator' : 'Admin'} · ${TAB_WORDS[s.view?.tab] || '—'} · ${s.connected ? `connected (${s.who})` : `dropped off at ${at(s.lastSeen)}`}`),
+      admin && h('label', { class: 'limitrow' }, h('span', { class: 'dim' }, 'May do '), limitSel(s.limit || 'admin', v => setLimit({ screen: s.id, name: s.name, limit: v }), s.id === screenId && !S.signin))),
     s.id === screenId ? h('button', { class: 'mini always', onclick: () => { const n = prompt('Name for this screen (e.g. "Rocco\'s iPad", "SM desk")', screenName); if (n?.trim()) { screenName = store('screenName', n.trim().slice(0, 40)); hello(); } } }, 'Rename')
       : h('button', { class: 'mini always', onclick: () => carryOn(s) }, 'Carry on here'))));
+  };
   (updaters.__screens ||= []).push(draw); draw();
   return h('div', { class: 'card' }, h('h3', {}, 'Screens'),
-    h('p', { class: 'dim' }, 'Every iPad, phone and computer using Show Control. If one stops, open Show Control on a spare and tap "Carry on here" next to it.'), list);
+    h('p', { class: 'dim' }, 'Every iPad, phone and computer using Show Control. If one stops, open Show Control on a spare and tap "Carry on here" next to it.'), fresh, list);
 });

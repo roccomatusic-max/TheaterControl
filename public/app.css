@@ -318,3 +318,9 @@ textarea { font: inherit; font-size: 17px; color: var(--text); background: #000;
 .videofield { grid-column: 1 / -1; }
 .videofield .row input { flex: 1 1 200px; min-width: 0; }
 .vres { text-transform: none; letter-spacing: 0; font-size: 13px; } .vres.ok { color: #7ee2a2; } .vres.bad { color: #ffb4b6; }
+/* Phones: seven tabs fit side by side with shorter names */
+@media (max-width: 480px) {
+  nav#tabs button[data-short] { font-size: 0 !important; }
+  nav#tabs button[data-short]::after { content: attr(data-short); font-size: 12px; }
+}
+.crewscreen { display: flex; gap: 10px; align-items: center; justify-content: space-between; }

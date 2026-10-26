@@ -70,7 +70,7 @@ VIEWS.edit = () => S.lock ? h('div', { class: 'card' }, h('h3', {}, 'Edit cues',
 SYS_CARDS.push(() => {
   const card = h('div', { class: 'card' }, h('h3', {}, 'Who can do what'));
   if (S.role !== 'admin') {
-    card.append(h('p', {}, `This screen is signed in as ${ROLE_WORDS[S.role].toLowerCase()}.`, S.role === 'viewer' ? ' It can watch but not control anything.' : ' It can run the show but not change the equipment setup or PINs.'),
+    card.append(h('p', {}, `This screen is signed in as ${(ROLE_WORDS[S.role] || 'admin').toLowerCase()}.`, S.role === 'viewer' ? ' It can watch but not control anything.' : ' It can run the show but not change the equipment setup or PINs.'),
       h('button', { class: 'always', onclick: signOut }, 'Sign in with a different PIN'));
     return card;
   }

@@ -220,14 +220,16 @@ function loadState() {
   } catch { /* first run */ }
 }
 let stateTimer = null;
+function writeState() {
+  try { writeJson(STATE_PATH, { index: show.index, lastFired: show.lastFired, timers: show.timers, camFollow: show.camFollow, recordAuto: recorder.auto, savedAt: Date.now() }); }
+  catch (e) { log({ device: 'core', level: 'warn', msg: `could not save show position: ${e.message}`, t: Date.now() }); }
+}
 function saveState() {
   if (!STATE_PATH || stateTimer) return;
-  stateTimer = setTimeout(() => {
-    stateTimer = null;
-    try { writeJson(STATE_PATH, { index: show.index, lastFired: show.lastFired, timers: show.timers, camFollow: show.camFollow, recordAuto: recorder.auto, savedAt: Date.now() }); }
-    catch (e) { log({ device: 'core', level: 'warn', msg: `could not save show position: ${e.message}`, t: Date.now() }); }
-  }, 200);
+  stateTimer = setTimeout(() => { stateTimer = null; writeState(); }, 200);
 }
+// A GO just before Show Control stops (restart, update, Ctrl-C) is still saved: the next start resumes after it.
+function flushState() { if (stateTimer) { clearTimeout(stateTimer); stateTimer = null; writeState(); } }
 loadState();
 const crew = createCrew({ cfg, show, savePath: SAVE_PATH, writeJson, broadcast: m => broadcast(m), log, saveCues: (c, who) => saveCues(c, who),
   statePath: STATE_PATH && path.join(path.dirname(STATE_PATH), `.${path.basename(SAVE_PATH, '.json')}.crew.json`),
@@ -328,6 +330,9 @@ function fireCue(i, source) {
   saveState();
   crew.fired(i);
 }
+// Seconds after a GO in which another GO is ignored (show.goLockout in the show file; 0 turns it off).
+const GO_LOCKOUT = Math.max(0, Number(cfg.show?.goLockout ?? 0.5)) * 1000;
+let lastGo = { at: 0, who: '', name: '' };
 function timer(name, op) {
   const tm = show.timers[name]; if (!tm) return;
   if (op === 'start' && !tm.start) { tm.start = Date.now(); if (name === 'show' && recorder.auto) recorder.start('show timer'); }
@@ -447,7 +452,7 @@ const ctx = {
   HOME_DIR,
   guards: [], // (msg, ws) => throws a plain-words reason when that screen may not do this now
   // Replaced by features/access.js (PINs per role); this is the single-PIN behaviour without it.
-  access: { required: () => !!PIN, hint: () => ({}), roleFor: pin => (!PIN || String(pin) === String(PIN) ? 'admin' : null) },
+  access: { required: () => !!PIN, hint: () => ({}), roleFor: pin => (!PIN || String(pin) === String(PIN) ? 'admin' : null), limit: (ws, role) => role },
   clients: () => [...sockets].flatMap(w => [...w.clients]).filter(c => c.authed && c.readyState === 1 && !c.mirror),
   // Equipment connections open once the server is listening, unless a feature holds them (the
   // backup computer on standby). Each device is started at most once per run.
@@ -532,7 +537,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 const sockets = new Set([wss]); // plus the HTTPS one, for phone cameras
 // A stand-in screen (features/remote.js: button boxes, OSC, MIDI, timecode) is handled exactly like a real one.
-ctx.attachScreen = (ws, label) => wss.emit('connection', ws, { socket: { remoteAddress: label } });
+ctx.attachScreen = (ws, label) => { ws.standIn = true; wss.emit('connection', ws, { socket: { remoteAddress: label } }); };
 function broadcast(msg) {
   const s = JSON.stringify(msg);
   for (const w of sockets) for (const c of w.clients) if (c.authed && c.readyState === 1) c.send(s);
@@ -560,8 +565,12 @@ function removePhone(ws, slot) {
 
 function onConnection(ws, req) {
   const who = ws.who = req.socket.remoteAddress?.replace('::ffff:', '');
+  // Which iPad or phone this is (kept on the device), so the System tab can limit what it may do.
+  const sid = /[?&]screen=([A-Za-z0-9_-]{4,40})/.exec(req.url || '')?.[1];
+  if (sid) ws.screenId = sid;
   ws.authed = !ctx.access.required(); ws.readonly = false; ws.phones = new Set();
-  ws.role = ws.authed ? 'admin' : null;
+  ws.signedInAs = ws.authed ? 'admin' : null;
+  ws.role = ws.authed ? ctx.access.limit(ws, 'admin') : null;
   const hello = () => {
     const token = crypto.randomBytes(16).toString('hex');
     // Recordings and notes need a full sign-in; screens and crew phones may only watch video.
@@ -573,6 +582,7 @@ function onConnection(ws, req) {
       firstRun: firstRun(), cueCommands: catalog.cueCatalog(),
     }, ...(ws.readonly ? [] : ctx.initExtras.map(f => f(ws))))));
   };
+  ws.hello = hello; // sent again when the System tab changes what this screen may do
   if (ws.authed) hello(); else ws.send(JSON.stringify({ t: 'auth-required', ...ctx.access.hint() }));
   ws.on('close', () => { tokens.delete(ws.token); for (const slot of [...ws.phones]) removePhone(ws, slot); });
   const reply = (m, data) => ws.send(JSON.stringify({ t: 'reply', id: m.id, data }));
@@ -582,7 +592,7 @@ function onConnection(ws, req) {
     if (m.t === 'auth') {
       const key = viewKey(), role = m.key == null ? ctx.access.roleFor(m.pin) : null;
       if (m.key != null && key && String(m.key) === key) { ws.authed = true; ws.readonly = true; ws.role = 'viewer'; hello(); log({ device: 'core', msg: `screen ${who} connected`, t: Date.now() }); }
-      else if (role) { ws.authed = true; ws.role = role; hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
+      else if (role) { ws.authed = true; ws.signedInAs = role; ws.role = ctx.access.limit(ws, role); hello(); log({ device: 'core', msg: `client ${who} signed in${role !== 'admin' ? ` (${role})` : ''}`, t: Date.now() }); }
       else ws.send(JSON.stringify({ t: 'auth-failed' }));
       return;
     }
@@ -598,7 +608,14 @@ function onConnection(ws, req) {
         if (m.id) ws.send(JSON.stringify({ t: 'result', id: m.id, results }));
       }
       else if (m.t === 'show') {
-        if (m.action === 'go') fireCue(show.index, who);
+        if (m.action === 'go') {
+          // Two GOs at once (the SM and the operator, a foot pedal bounce, a double tap on a slow
+          // network) would skip a cue: the second one within the lockout is ignored, and said so.
+          const since = Date.now() - lastGo.at;
+          if (since < GO_LOCKOUT) throw new Error(`Second GO ignored: ${lastGo.who === who ? 'pressed twice' : `${lastGo.name} pressed GO`} ${(since / 1000).toFixed(1)} s ago`);
+          lastGo = { at: Date.now(), who, name: ctx.screenName?.(who) || who };
+          fireCue(show.index, who);
+        }
         else if (m.action === 'fire') fireCue(Number(m.index), who);
         else if (m.action === 'standby') { show.index = Math.max(0, Math.min(show.cues.length, Number(m.index))); saveState(); }
         else if (m.action === 'timer') timer(m.timer, m.op);
@@ -702,7 +719,7 @@ server.listen(PORT, cfg.server?.host || '0.0.0.0', () => {
 module.exports = { server, lanAddresses };
 
 // Whatever way this process ends, the recording is closed off and the video relay stopped with it.
-process.on('exit', () => { try { recorder.stop('Show Control stopping'); } catch { /* nothing recording */ } video.stop(); });
+process.on('exit', () => { flushState(); try { recorder.stop('Show Control stopping'); } catch { /* nothing recording */ } video.stop(); });
 function shutdown() { ctx.stopDevices(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 // A bug in one driver must not take the whole show down: log it and keep running.
