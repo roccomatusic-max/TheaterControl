@@ -125,6 +125,10 @@ function connect({ screen, pin, from = '127.0.0.2' } = {}) {
   ipad.send({ t: 'show', action: 'standby', index: 5 }); await wait(50);
   await stop();
   assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).index, 5);
+  // ...and everything that happened is in today's log file
+  const logs = fs.readdirSync(path.join(tmp, 'Logs'));
+  assert.equal(logs.length, 1);
+  assert.match(fs.readFileSync(path.join(tmp, 'Logs', logs[0]), 'utf8'), /show: GO .*Rocco iPad|show: GO /);
 
   // ---- with PINs: the admin PIN always gets everything; the limit applies to the others ----
   const withPins = JSON.parse(fs.readFileSync(file, 'utf8'));

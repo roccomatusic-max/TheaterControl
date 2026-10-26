@@ -206,6 +206,8 @@ The simulators speak the real protocols, so the same drivers talk to the real ge
 - **Two GOs at once**: a GO from another screen within half a second of the last one (the SM and the
   operator, an iPad and a Stream Deck) is ignored, and that screen is told. `"show": { "goLockout": 0.5 }`
   in the show file changes the time; 0 turns it off.
+- **Log file**: everything on the System tab's log is also kept in `Show Control/Logs/<date>.log`
+  (the newest 60 days), so what happened during last night's show can be looked up after a restart.
 - **A cue step that didn't work** (equipment not connected, refused, no answer) shows on every screen
   straight away, one alert per piece of equipment, until it takes a cue step again.
 - **Cue list history**: every saved cue list is kept (the newest 200) in `Show Control/Cue list history`.

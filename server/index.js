@@ -64,6 +64,26 @@ if (MODE === 'practice' && process.env.SHOW_SIM_CONFIG) {
   } catch { /* no practice show to merge */ }
 }
 
+// ---------- log file ----------
+// Everything on the System tab's log is also kept in Show Control/Logs/<date>.log (the newest 60
+// days), so "what happened at cue 34 last night?" can be answered after a restart.
+const LOG_DIR = process.env.SHOW_LOG_DIR || path.join(HOME_DIR, 'Logs');
+let logOut = null, logDay = '';
+function logToFile(e) {
+  if (process.env.SHOW_LOG_DIR === '0') return;
+  try {
+    const t = new Date(e.t || Date.now()), day = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    if (day !== logDay) {
+      logOut?.end(); logDay = day;
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+      logOut = fs.createWriteStream(path.join(LOG_DIR, `${day}.log`), { flags: 'a' });
+      logOut.on('error', () => { logOut = null; }); // a full or missing disk must not stop the show
+      for (const f of fs.readdirSync(LOG_DIR).filter(f => /^\d{4}-\d{2}-\d{2}\.log$/.test(f)).sort().slice(0, -60)) fs.rmSync(path.join(LOG_DIR, f), { force: true });
+    }
+    logOut?.write(`${t.toTimeString().slice(0, 8)}  ${(e.level || 'info').padEnd(5)}  ${e.device || 'core'}: ${e.msg}\n`);
+  } catch { logOut = null; }
+}
+
 // ---------- devices ----------
 const PTZ_TYPES = ['ptz', 'panasonic-cam']; // cameras that move (cue shots, emergency STOP)
 const logRing = [];
@@ -71,6 +91,7 @@ const devices = new Map();
 function log(entry) {
   logRing.push(entry); if (logRing.length > 300) logRing.shift();
   broadcast({ t: 'log', entry });
+  logToFile(entry);
   if (!process.env.SHOW_QUIET) console.log(`[${new Date(entry.t).toISOString().slice(11, 19)}] ${entry.device || 'core'}: ${entry.msg}`);
 }
 for (const dc of cfg.devices) {

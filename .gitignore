@@ -12,3 +12,4 @@ config/Recordings/
 config/Notes/
 config/.*.state.json
 config/.go2rtc.pid
+config/Logs/
